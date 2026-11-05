@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "cli/**"
+      - "engine/tests/**"
       - "docs/examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
