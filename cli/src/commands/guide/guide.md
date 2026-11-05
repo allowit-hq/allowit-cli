@@ -11,11 +11,11 @@ The SDK engine shares execution and recovery across CLI and server callers.
 Rail libraries own native encoding, signatures, simulation and settlement.
 Core supplies portable policy types and common transport and storage primitives.
 
-The [workspace manifest](https://github.com/allowit-hq/allowit-sdk/blob/main/Cargo.toml)
-and [lockfile](https://github.com/allowit-hq/allowit-sdk/blob/main/Cargo.lock)
+The [workspace manifest](https://github.com/allowit-hq/allowit-cli/blob/main/Cargo.toml)
+and [lockfile](https://github.com/allowit-hq/allowit-cli/blob/main/Cargo.lock)
 select vendor dependencies and their exact source versions.
 The [rail table](https://github.com/allowit-hq/allowit-sdk/blob/main/engine/src/routing.rs)
-and [adapter wiring](https://github.com/allowit-hq/allowit-sdk/blob/main/cli/src/vendors/mod.rs)
+and [adapter wiring](https://github.com/allowit-hq/allowit-cli/blob/main/cli/src/vendors/mod.rs)
 register them in the executable. Adding a Cargo dependency alone does not register an adapter.
 These links describe the source checkout. Inspect your installed build with the commands below.
 
@@ -33,10 +33,10 @@ This output is the installed build's inventory, including canonical identifiers 
 `rail show` reports its operations, available commands, key curve and asset metadata.
 A command that needs a rail exits 3 until one is selected.
 
-Use the selected [adapter's configuration](https://github.com/allowit-hq/allowit-sdk/tree/main/cli/src/vendors)
+Use the selected [adapter's configuration](https://github.com/allowit-hq/allowit-cli/tree/main/cli/src/vendors)
 for its public wallet profile, address formats and native asset syntax.
 Vendor-specific profile inputs belong to adapter configuration, not the common command contract.
-See [known issues](https://github.com/allowit-hq/allowit-sdk/blob/main/known_issues.md) for profile and native-binding workarounds.
+See [known issues](https://github.com/allowit-hq/allowit-cli/blob/main/known_issues.md) for profile and native-binding workarounds.
 `ALLOWIT_URL` selects the server origin.
 
 ## 2. Create and select your key
