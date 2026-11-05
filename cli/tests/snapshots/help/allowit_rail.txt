@@ -1,0 +1,32 @@
+List rails, show what a rail supports and choose the current rail
+
+Usage: allowit rail [OPTIONS] <COMMAND>
+
+Examples:
+  allowit rail ls
+  allowit rail use stellar:testnet
+  allowit rail show
+
+Commands:
+  trust  Configure an independently verified public server identity for the selected rail
+  ls     List the admitted rails with their CAIP-2 identifiers and aliases [alias: list]
+  show   Show a rail: its identity, what works on it, and its local settings
+  use    Choose the current rail. Each rail keeps its own wallet and agent key
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+Global options:
+  -n, --rail <RAIL>       Rail identifier or alias from rail ls [env: ALLOWIT_RAIL] [alias:
+                          --network]
+      --wallet <ADDR>     Wallet address accepted by the selected rail [env: ALLOWIT_WALLET]
+      --output <FORMAT>   Output format [possible values: text, json]
+      --json              Same as --output json
+  -y, --yes               Confirm destructive actions without a prompt
+  -q, --quiet             Print no progress on stderr
+  -v, --verbose           Print the resolved rail, wallet and config directory on stderr
+      --no-color          Disable color (NO_COLOR also disables it)
+      --config-dir <DIR>  Config directory [default: $XDG_CONFIG_HOME/allowit or ~/.config/allowit]
+                          [env: ALLOWIT_CONFIG_DIR]
+      --rpc-url <URL>     RPC URL override for the selected rail
