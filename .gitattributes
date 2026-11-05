@@ -1,4 +1,0 @@
-/src/usage.txt text eol=lf
-/src/tempo-usage.txt text eol=lf
-/THIRD_PARTY_LICENSES/crates/** -text
-/THIRD_PARTY_LICENSES/toolchains/** -text
