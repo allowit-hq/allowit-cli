@@ -21,11 +21,7 @@ pub(crate) fn run(args: &[String], stdout: &mut String) -> Result<i32> {
     }
     let get = |key| flags.get(key).copied().ok_or_else(|| Error::usage(usage));
     let network = routing::selected().ok_or_else(|| Error::usage(usage))?;
-    if network != "stellar:testnet" {
-        return Err(Error::unsupported(
-            "Native Stellar approval links support Testnet only",
-        ));
-    }
+    check_network(&network)?;
     let file = std::fs::File::open(get("--policy-file")?)
         .map_err(|_| Error::config("Cannot read public Stellar policy file"))?;
     let mut bytes = Vec::new();

@@ -1,9 +1,6 @@
 //! Independent replay of the current server HTTP contract, not a live generation or build proof.
 #![allow(dead_code)]
-use base64::{Engine, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signature, VerifyingKey};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -15,10 +12,9 @@ use std::{
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 pub fn fixture() -> Value {
-    serde_json::from_str(include_str!("../fixtures/stellar-owner-generation.json")).unwrap()
+    allowit_stellar_wallet::test_support::owner_generation_fixture()
 }
 pub fn now() -> u64 {
     SystemTime::now()
@@ -26,27 +22,11 @@ pub fn now() -> u64 {
         .unwrap()
         .as_secs()
 }
-fn date(value: u64) -> String {
-    OffsetDateTime::from_unix_timestamp(value as i64)
-        .unwrap()
-        .format(&Rfc3339)
-        .unwrap()
-}
 pub fn challenge(owner: &str, origin: &str, now: u64) -> Value {
-    let nonce = "ab".repeat(32);
-    let expiry = date(now + 300);
-    let host = origin.split_once("://").unwrap().1;
-    json!({"id":nonce,"address":owner,"origin":origin,"expiresAt":expiry,
-        "message":format!("{host} wants you to sign in with your Stellar account:\n{owner}\n\nSign in to AllowIt. This does not authorize spending or move funds.\n\nURI: {origin}\nVersion: 1\nNonce: {nonce}\nIssued At: {}\nExpiration Time: {expiry}",date(now))})
+    allowit_stellar_wallet::test_support::server::owner_signin_challenge(owner, origin, now)
 }
 pub struct Plan {
-    pub owner: String,
-    pub origin: String,
-    pub challenge: Value,
-    pub discovery: Value,
-    pub templates: Value,
-    pub installations: Value,
-    pub policy: Value,
+    documents: allowit_stellar_wallet::test_support::server::OwnerDocuments,
     pub guest_cookie: String,
     pub rotate_cookie: bool,
     pub lost_generation: bool,
@@ -59,19 +39,25 @@ pub struct Plan {
     pub activation: Option<Value>,
     pub export: Option<Value>,
 }
+impl std::ops::Deref for Plan {
+    type Target = allowit_stellar_wallet::test_support::server::OwnerDocuments;
+    fn deref(&self) -> &Self::Target {
+        &self.documents
+    }
+}
+impl std::ops::DerefMut for Plan {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.documents
+    }
+}
 impl Plan {
     pub fn new(owner: &str) -> Self {
-        let policy = fixture()["policy"].clone();
-        let b = &policy["runtime"]["instanceBinding"];
-        let origin = "http://localhost:5173".to_owned();
         Self {
-            owner: owner.into(),
-            origin: origin.clone(),
-            challenge: challenge(owner, &origin, now()),
-            discovery: json!({"wallets":[{"kind":"contract-wallet","profile":"allowit-stellar-policy-wallet-v1","sourceProfiles":["allowit-stellar-transfer-v1"],"networks":["stellar:testnet"],"operations":["stellar::sep41_transfer"],"capabilities":{"generate":true,"fund":true}}],"operations":[{"function":"stellar::sep41_transfer","services":[]}]}),
-            templates: json!({"templates":[{"network":"stellar:testnet","profiles":["allowit-stellar-policy-wallet-v1"],"asset":b["asset"],"assetSymbol":b["assetSymbol"],"assetIssuer":b["assetIssuer"],"maxFeeStroops":b["maxFeeStroops"]}]}),
-            installations: json!({"installations":[]}),
-            policy,
+            documents: allowit_stellar_wallet::test_support::server::OwnerDocuments::new(
+                owner,
+                "http://localhost:5173",
+                now(),
+            ),
             guest_cookie: format!(
                 "allowit_session={}; Path=/; HttpOnly; SameSite=Lax",
                 "g".repeat(32)
@@ -203,17 +189,13 @@ impl Server {
                     assert_eq!(body["message"], plan.challenge["message"]);
                     assert_eq!(body["id"], plan.challenge["id"]);
                     assert_eq!(body["address"], plan.owner);
-                    let mut bytes = b"Stellar Signed Message:\n".to_vec();
-                    bytes.extend(body["message"].as_str().unwrap().as_bytes());
-                    let digest = Sha256::digest(bytes);
-                    let key = allowit_stellar_wallet::account_key(&plan.owner).unwrap();
-                    let sig = STANDARD
-                        .decode(body["signature"].as_str().unwrap())
-                        .unwrap();
-                    VerifyingKey::from_bytes(&key)
-                        .unwrap()
-                        .verify_strict(&digest, &Signature::from_slice(&sig).unwrap())
-                        .unwrap();
+                    assert!(
+                        allowit_stellar_wallet::test_support::verify_owner_challenge(
+                            &plan.owner,
+                            body["message"].as_str().unwrap(),
+                            body["signature"].as_str().unwrap(),
+                        )
+                    );
                     if let Some(location) = &plan.redirect_verify {
                         reply(
                             &mut stream,
@@ -227,7 +209,10 @@ impl Server {
                     reply(
                         &mut stream,
                         200,
-                        json!({"session":{"address":plan.owner,"network":"stellar","expiresAt":date(now()+86400)}}),
+                        allowit_stellar_wallet::test_support::server::owner_session(
+                            &plan.owner,
+                            now() + 86400,
+                        ),
                         &format!("Set-Cookie: {cookie}; Path=/; HttpOnly; SameSite=Lax\r\n"),
                     );
                     continue;
@@ -279,15 +264,10 @@ impl Server {
                         {
                             continue;
                         }
-                        let hash = allowit_stellar_wallet::rpc::signed_transaction_hash(
-                            "stellar:testnet",
-                            signed,
-                        )
-                        .unwrap();
                         reply(
                             &mut stream,
                             200,
-                            json!({"status":"confirmed","transactionHash":allowit_stellar_wallet::hex(&hash)}),
+                            allowit_stellar_wallet::test_support::server::confirmed_owner_submission("stellar:testnet",signed),
                             "",
                         );
                     }
@@ -304,12 +284,13 @@ impl Server {
                         if plan.lost_generation {
                             continue;
                         }
-                        let mut policy = plan.policy.clone();
-                        policy["originalIntent"] = body["prompt"].clone();
                         reply(
                             &mut stream,
                             200,
-                            json!({"selectedId":policy["id"],"policies":[policy]}),
+                            allowit_stellar_wallet::test_support::server::generated_policy_reply(
+                                &plan.policy,
+                                &body["prompt"],
+                            ),
                             "",
                         )
                     }

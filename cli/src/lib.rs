@@ -2,11 +2,12 @@
 //! live here; engine requests and service composition come from
 //! `allowit-sdk-engine`, which has no terminal I/O.
 pub use allowit_sdk_engine::{VERSION, error, wallet};
-pub(crate) use allowit_sdk_engine::{config, output, request, routing};
+pub(crate) use allowit_sdk_engine::{config, output, request};
 mod commands;
 mod ctx;
 mod exit;
 mod owner;
+mod routing;
 mod settings;
 mod term;
 pub mod vendors;

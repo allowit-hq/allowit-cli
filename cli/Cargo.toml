@@ -34,9 +34,6 @@ zeroize = "1.8.2"
 
 [dev-dependencies]
 allowit-sdk = { workspace = true, features = ["std", "client"] }
-allowit-stellar-wallet = { workspace = true }
-ed25519-dalek = "2"
-time = { version = "0.3.55", features = ["formatting"] }
+allowit-stellar-wallet = { workspace = true, features = ["test-support"] }
 sha2 = "0.10.9"
 base64 = "0.22.1"
-stellar-xdr = { version = "=28.0.0", features = ["std", "base64"] }
