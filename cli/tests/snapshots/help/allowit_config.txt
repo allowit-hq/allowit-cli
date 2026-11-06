@@ -1,0 +1,29 @@
+Show the configuration and where it lives
+
+Usage: allowit config [OPTIONS] <COMMAND>
+
+Examples:
+  allowit config show
+  allowit config path
+
+Commands:
+  show  Show the config file, current rail and engine URL
+  path  Print the path of config.toml
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+Global options:
+  -n, --rail <RAIL>       Rail identifier or alias from rail ls [env: ALLOWIT_RAIL] [alias:
+                          --network]
+      --wallet <ADDR>     Wallet address accepted by the selected rail [env: ALLOWIT_WALLET]
+      --output <FORMAT>   Output format [possible values: text, json]
+      --json              Same as --output json
+  -y, --yes               Confirm destructive actions without a prompt
+  -q, --quiet             Print no progress on stderr
+  -v, --verbose           Print the resolved rail, wallet and config directory on stderr
+      --no-color          Disable color (NO_COLOR also disables it)
+      --config-dir <DIR>  Config directory [default: $XDG_CONFIG_HOME/allowit or ~/.config/allowit]
+                          [env: ALLOWIT_CONFIG_DIR]
+      --rpc-url <URL>     RPC URL override for the selected rail

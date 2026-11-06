@@ -1,0 +1,29 @@
+name: CLI
+on:
+  pull_request:
+    paths:
+      - "cli/**"
+      - "engine/tests/**"
+      - "docs/examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/cli.yml"
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo test --locked -p allowit-cli
+      - run: cargo test --locked -p allowit-policy-template
+      - run: cargo clippy --locked -p allowit-cli --all-targets -- -D warnings

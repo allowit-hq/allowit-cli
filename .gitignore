@@ -1,0 +1,10 @@
+/target/
+*.log
+.DS_Store
+
+# Task evidence belongs to the main project wiki.
+/artifacts/
+/evidence/
+
+__pycache__/
+*.py[cod]
