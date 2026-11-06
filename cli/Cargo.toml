@@ -20,7 +20,7 @@ default = ["stellar"]
 stellar = ["allowit-sdk-engine/stellar"]
 
 [dependencies]
-allowit-sdk-engine = { git = "https://github.com/allowit-hq/allowit-sdk.git", rev = "a2e50c4722fd82a7803c0bb1c78de5c2858a664f", default-features = false }
+allowit-sdk-engine = { package = "allowit-sdk", git = "https://github.com/allowit-hq/allowit-sdk.git", tag = "v0.5.0", version = "0.5", default-features = false }
 serde_json_canonicalizer = "0.3"
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6"
@@ -34,9 +34,6 @@ zeroize = "1.8.2"
 
 [dev-dependencies]
 allowit-sdk = { workspace = true, features = ["std", "client"] }
-allowit-stellar-wallet = { workspace = true }
-ed25519-dalek = "2"
-time = { version = "0.3.55", features = ["formatting"] }
+allowit-stellar-wallet = { workspace = true, features = ["test-support"] }
 sha2 = "0.10.9"
 base64 = "0.22.1"
-stellar-xdr = { version = "=28.0.0", features = ["std", "base64"] }

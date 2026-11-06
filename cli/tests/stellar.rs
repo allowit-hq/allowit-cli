@@ -17,28 +17,10 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
-use stellar_xdr::{
-    Limits, OperationResult, OperationResultTr, PaymentResult, TransactionResult,
-    TransactionResultExt, TransactionResultResult, WriteXdr,
-};
 
 const POLICY: &str = "stellar-policy";
 const ID: &str = "stellar-run-0001";
 
-fn nonce() -> [u8; 32] {
-    let mut v = b"allowit-workflow-operation-v1\0".to_vec();
-    v.extend(POLICY.as_bytes());
-    v.push(0);
-    v.extend(ID.as_bytes());
-    sdk::hash(v)
-}
-fn acct(s: &str) -> AccountId {
-    AccountId {
-        chain: Chain::Stellar,
-        kind: AccountKind::Wallet,
-        address: sdk::account_key(s).unwrap(),
-    }
-}
 fn dest() -> String {
     sdk::account_for_seed(&[6; 32])
 }
@@ -46,131 +28,19 @@ fn dest() -> String {
 /// The wallet, the request that `exec` must build from its flags, the chain
 /// state and the current time.
 fn fixture() -> (WalletConfig, ExecutionRequest, TrustedState, u64) {
-    let owner = sdk::account_for_seed(&[1; 32]);
-    let agent = sdk::account_for_seed(&[2; 32]);
-    let engine = sdk::account_for_seed(&[3; 32]);
-    let source = "use allowit::prelude::*; pub fn execute(ctx: &AllowitContext) -> allowit::Result { Ok(()) }".to_string();
-    let mut c = WalletConfig {
-        network: "stellar:testnet".into(),
-        policy_instance: [7; 32],
-        wallet: owner.clone(),
-        owner: owner.clone(),
-        agent: agent.clone(),
-        server: engine.clone(),
-        route: WalletRoute::Native,
-        tier: None,
-        language: sdk::PolicyLanguage::Portable,
-        rules: vec![],
-        params: Default::default(),
-        source_digest: [0; 32],
-        asset: String::new(),
-        asset_symbol: "XLM".into(),
-        asset_issuer: None,
-        source_hash: sdk::hash(&source),
-        policy_source: source,
-        module_digest: [5; 32],
-        max_fee_stroops: 50000,
-    };
-    c.asset = sdk::sac_address(&c.network, &sdk::asset_xdr(&c).unwrap()).unwrap();
-    common::portable_descriptor(&mut c);
-    let asset = WorkflowAsset::Native {
-        chain: Chain::Stellar,
-        network: sdk::network_id(&c.network).unwrap(),
-    };
-    let r = ExecutionRequest {
-        operation: OperationRef {
-            policy_instance: c.policy_instance,
-            nonce: nonce(),
-        },
-        input: ExecutionInput::Instructions(vec![NativeInstruction::StellarNativeTransfer {
-            source: acct(&owner),
-            destination: acct(&dest()),
-            stroops: 1_000_000,
-        }]),
-        effect_bounds: vec![WorkflowEffectBound {
-            asset: asset.clone(),
-            source: acct(&owner),
-            beneficiary: acct(&dest()),
-            max_debit: 1_000_000u64.into(),
-            min_credit: 1_000_000u64.into(),
-            max_burn: 0u64.into(),
-        }],
-        fee_bounds: Some(vec![WorkflowFeeBound {
-            payer: acct(&owner),
-            asset,
-            max_fee: 50000u64.into(),
-        }]),
-        evidence: vec![],
-    };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let s = TrustedState {
-        contract_version: None,
-        policy_state: None,
-        source: AccountState {
-            address: owner.clone(),
-            sequence: 40,
-            master_weight: 3,
-            low_threshold: 2,
-            medium_threshold: 2,
-            high_threshold: 3,
-            signers: vec![
-                AccountSigner {
-                    key: agent.clone(),
-                    weight: 1,
-                },
-                AccountSigner {
-                    key: engine.clone(),
-                    weight: 1,
-                },
-            ],
-        },
-        nonce: 9,
-        deployment_version: 4,
-        spent_daily: 0,
-        spent_total: 0,
-        spent_day: now / 86400,
-        calls: 0,
-        ledger: 100,
-        module_digest: c.module_digest,
-        source_hash: c.source_hash,
-        owner,
-        agent,
-        server: engine,
-        policy_instance: c.policy_instance,
-    };
-    (c, r, s, now)
+    sdk::test_support::agent_fixture(POLICY, ID, now)
 }
 fn expires(now: u64) -> u64 {
-    (now + 120).min((now / 86400 + 1) * 86400 - 1)
+    sdk::test_support::request_expiry(now)
 }
 
 /// The public wallet profile: no signing material.
 fn profile(c: &WalletConfig) -> Value {
-    let mut value = json!({"version":1,"profile":PROFILE,"network":c.network,"policyId":POLICY,
-        "sourceHash":sdk::hex(&c.source_hash),"irHash":sdk::hex(&[4;32]),
-        "moduleDigest":sdk::hex(&c.module_digest),"wallet":c.wallet,"route":c.route,"config":c,
-        "endpoints":{"execute":"/api/native/execute","status":"/api/native/execute/status"}});
-    if c.language == sdk::PolicyLanguage::Portable {
-        let mut checked = c.clone();
-        value["portable"] = common::portable_descriptor(&mut checked);
-        assert_eq!(checked.module_digest, c.module_digest);
-        value["language"] = json!("allowit-portable-v1");
-        value["irHash"] = json!("");
-    }
-    if c.route == WalletRoute::Native && c.language == sdk::PolicyLanguage::Portable {
-        let b = allowit_sdk_engine::vendors::stellar::runtime::client::decode_public_bundle(
-            &serde_json::to_vec(&value).unwrap(),
-        )
-        .unwrap();
-        let message = b.source_approval_message(1).unwrap();
-        let key = sdk::signing::LocalSigner::from_entropy(&[1; 32]).unwrap();
-        assert_eq!(key.account(), c.owner);
-        value["sourceApproval"] = json!({"revision":1,"signatures":[{"signer":key.account(),"signature":key.sign_digest(&sdk::signing::signed_message_digest(&message)).unwrap()}]});
-    }
-    value
+    sdk::test_support::public_profile(c, POLICY)
 }
 
 /// A sandbox on stellar:testnet with the agent key for `seed` set up, the
@@ -229,10 +99,10 @@ fn status(sandbox: &Sandbox) -> std::process::Output {
 }
 
 fn journal_file(sandbox: &Sandbox, request: &ExecutionRequest) -> PathBuf {
-    sandbox.config().join("stellar-journal").join(format!(
-        "request-{}.json",
-        sdk::hex(&sdk::hash(sdk::hex(&request.operation.nonce)))
-    ))
+    sandbox
+        .config()
+        .join(sdk::provider::EXECUTION_STORE_NAMESPACE)
+        .join(sdk::test_support::execution_record_filename(request))
 }
 /// Retains an unsigned prepared packet in the journal, as an interrupted
 /// exec leaves it.
@@ -244,16 +114,13 @@ fn retain_unsigned(
     now: u64,
 ) {
     use std::os::unix::fs::PermissionsExt;
-    let prepared = sdk::prepare(c, r, state, now, expires(now)).unwrap();
     let file = journal_file(sandbox, r);
     let dir = file.parent().unwrap();
     std::fs::create_dir_all(dir).unwrap();
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     common::private_write(
         &file,
-        &json!({"policyId":POLICY,"requestId":ID,"config":c,"request":r,"prepared":prepared,
-            "agentSignature":null,"status":"prepared"})
-        .to_string(),
+        &sdk::test_support::unsigned_execution_record(POLICY, ID, c, r, state, now).to_string(),
     );
 }
 
@@ -267,21 +134,13 @@ fn read_for(stream: &mut TcpStream, expected_signer: &str) -> (String, Value) {
         .lines()
         .find_map(|l| l.strip_prefix("authorization: Bearer "))
         .unwrap();
-    let parts: Vec<_> = proof.split('.').collect();
-    assert_eq!(parts.len(), 4);
-    assert_eq!(parts[0], "stellar-proof");
-    assert_eq!(parts[1], expected_signer);
     let path = h.lines().next().unwrap().split(' ').nth(1).unwrap();
-    let mut message = format!("allowit-stellar-request-v1\n{}\n{path}\n", parts[2]).into_bytes();
-    message.extend(serde_json_canonicalizer::to_vec(&body).unwrap());
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-    VerifyingKey::from_bytes(&sdk::account_key(parts[1]).unwrap())
-        .unwrap()
-        .verify(
-            &sdk::hash(message),
-            &Signature::from_bytes(&sdk::unhex::<64>(parts[3]).unwrap()),
-        )
-        .unwrap();
+    assert!(sdk::test_support::verify_request_proof(
+        proof,
+        path,
+        &serde_json_canonicalizer::to_vec(&body).unwrap(),
+        expected_signer,
+    ));
     let seed = common::stellar_seed([2; 32]);
     assert!(!h.contains(&seed));
     assert!(!body.to_string().contains(&seed));
@@ -298,31 +157,7 @@ fn reply_error(stream: &mut TcpStream, status: u16) {
     );
 }
 fn response(p: &PreparedOperation, s: Option<&SignedOperation>, status: &str) -> Value {
-    let receipt = if status == "confirmed" {
-        s.map(|signed| {
-            let result = TransactionResult {
-                fee_charged: 100,
-                result: TransactionResultResult::TxSuccess(
-                    vec![OperationResult::OpInner(OperationResultTr::Payment(
-                        PaymentResult::Success,
-                    ))]
-                    .try_into()
-                    .unwrap(),
-                ),
-                ext: TransactionResultExt::V0,
-            };
-            sdk::rpc::VerifiedReceipt {
-                transaction_hash: signed.transaction_hash,
-                status: OperationStatus::Confirmed,
-                ledger: 777,
-                envelope_xdr: signed.transaction_xdr.clone(),
-                result_xdr: result.to_xdr_base64(Limits::none()).unwrap(),
-            }
-        })
-    } else {
-        None
-    };
-    json!({"prepared":p,"operation":{"id":ID,"status":status,"transactionHash":sdk::hex(&p.transaction_hash)},"signedOperation":s,"receipt":receipt})
+    sdk::test_support::execution_response(p, s, status, ID)
 }
 fn signed_from_submit(
     stream: &mut TcpStream,

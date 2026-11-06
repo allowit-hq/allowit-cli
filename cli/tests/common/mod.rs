@@ -133,36 +133,7 @@ pub fn stdout(output: &Output) -> String {
 
 /// A Stellar S strkey for a 32-byte seed.
 pub fn stellar_seed(seed: [u8; 32]) -> String {
-    let mut raw = vec![18 << 3];
-    raw.extend(seed);
-    let mut crc = 0u16;
-    for b in &raw {
-        crc ^= (*b as u16) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 {
-                (crc << 1) ^ 0x1021
-            } else {
-                crc << 1
-            };
-        }
-    }
-    raw.extend(crc.to_le_bytes());
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let mut out = String::new();
-    let (mut bits, mut count) = (0u32, 0);
-    for b in raw {
-        bits = (bits << 8) | b as u32;
-        count += 8;
-        while count >= 5 {
-            count -= 5;
-            out.push(ALPHABET[((bits >> count) & 31) as usize] as char);
-        }
-        bits &= (1 << count) - 1;
-    }
-    if count > 0 {
-        out.push(ALPHABET[((bits << (5 - count)) & 31) as usize] as char);
-    }
-    out
+    allowit_stellar_wallet::test_support::secret_seed(seed)
 }
 
 /// A loopback listener that stands in for the engine or an RPC node.
@@ -270,30 +241,7 @@ pub fn assert_data(text: &str, what: &str) {
 
 /// Public descriptor metadata derived from a real portable configuration, never build proof.
 pub fn portable_descriptor(config: &mut allowit_stellar_wallet::WalletConfig) -> Value {
-    use allowit_stellar_wallet::{self as sdk, PolicyTier, WalletRoute};
-    let shape = sdk::policy::source_shape(&config.policy_source).unwrap();
-    let tier = if config.tier == Some(PolicyTier::Custom) {
-        "custom"
-    } else {
-        "standard"
-    };
-    let rules = if tier == "standard" {
-        shape.prefix.clone()
-    } else {
-        vec![]
-    };
-    let params_hash =
-        allowit_sdk::digest(&serde_json_canonicalizer::to_vec(&config.params).unwrap());
-    let identity = serde_json::json!({"language":"allowit-portable-v1","tier":tier,"rules":rules,"sourceHash":sdk::hex(&config.source_hash),"paramsHash":params_hash});
-    if config.route == WalletRoute::Native {
-        config.module_digest = sdk::unhex(&allowit_sdk::digest(
-            &serde_json_canonicalizer::to_vec(&identity).unwrap(),
-        ))
-        .unwrap();
-    }
-    serde_json::json!({"language":"allowit-portable-v1","sourceHash":sdk::hex(&config.source_hash),"tier":tier,"rules":rules,"params":config.params,"paramsHash":params_hash,
-        "asset":{"symbol":config.asset_symbol,"address":config.asset,"decimals":7},"unresolved":[],
-        "build":{"prefix":shape.prefix,"writesState":shape.writes_state,"libraryRevision":"6aa4235e6229e18d1f9780a6a9fdf80aceb0f348","attempts":1}})
+    allowit_stellar_wallet::test_support::portable_descriptor(config)
 }
 
 /// Seed an already verified export fixture. Production installation uses owner::export.

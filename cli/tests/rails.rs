@@ -7,6 +7,25 @@ use common::{Mock, Sandbox, code, stderr, stdout};
 use serde_json::{Value, json};
 
 #[test]
+fn unknown_rail_keeps_the_cli_recovery_hint_without_persisting_settings() {
+    let sandbox = Sandbox::new("unknown-rail-hint");
+    let mock = Mock::new();
+    let output = sandbox.run(&["--json", "rail", "show", "stellar:futurenet"]);
+    assert_eq!(code(&output), Some(2));
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        error["error"]["message"],
+        "unknown rail \"stellar:futurenet\"; run allowit rail ls"
+    );
+    assert_eq!(error["error"]["exit"], 2);
+    assert!(!sandbox.config().join("config.toml").exists());
+    assert!(!sandbox.config().join("keys").exists());
+    assert!(!sandbox.config().join("secrets").exists());
+    mock.assert_untouched();
+}
+
+#[test]
 fn rail_aliases_and_settings_stay_bound_to_the_selected_stellar_network() {
     let mut sandbox = Sandbox::new("rail");
     assert_eq!(code(&sandbox.run(&["keys", "generate", "agent"])), Some(3));
@@ -344,45 +363,10 @@ fn stdout_escapes_display_controls_and_redacts_the_engine_token() {
 }
 
 fn stellar_approval_fixture() -> Value {
-    serde_json::from_str(include_str!(
-        "../../engine/tests/fixtures/stellar-portable-approval.json"
-    ))
-    .unwrap()
+    allowit_stellar_wallet::test_support::portable_approval()
 }
-
 fn public_stellar_profile(fixture: &Value) -> Value {
-    use allowit_stellar_wallet::{self as sdk, WalletConfig, WalletRoute};
-    let policy = &fixture["policy"];
-    let mut config = WalletConfig {
-        network: "stellar:testnet".into(),
-        policy_instance: [7; 32],
-        wallet: fixture["intent"]["owner"].as_str().unwrap().into(),
-        owner: fixture["intent"]["owner"].as_str().unwrap().into(),
-        agent: sdk::account_for_seed(&[2; 32]),
-        server: sdk::account_for_seed(&[3; 32]),
-        route: WalletRoute::Native,
-        tier: None,
-        language: sdk::PolicyLanguage::Portable,
-        rules: vec![],
-        params: serde_json::from_value(
-            policy["runtime"]["instanceBinding"]["portable"]["params"].clone(),
-        )
-        .unwrap(),
-        source_digest: [0; 32],
-        asset: policy["mint"].as_str().unwrap().into(),
-        asset_symbol: "XLM".into(),
-        asset_issuer: None,
-        policy_source: policy["code"].as_str().unwrap().into(),
-        source_hash: sdk::unhex(policy["sourceHash"].as_str().unwrap()).unwrap(),
-        module_digest: [5; 32],
-        max_fee_stroops: 100,
-    };
-    let portable = common::portable_descriptor(&mut config);
-    json!({"language":"allowit-portable-v1","portable":portable,"version":1,"profile":sdk::PROFILE,"network":config.network,
-        "policyId":policy["id"],"sourceHash":policy["sourceHash"],"irHash":policy["irHash"],
-        "moduleDigest":sdk::hex(&config.module_digest),"wallet":config.wallet,
-        "route":"native","config":config,
-        "endpoints":{"execute":"/api/native/execute","status":"/api/native/execute/status"}})
+    allowit_stellar_wallet::test_support::approval_public_profile(fixture)
 }
 
 fn stellar_sandbox(profile: &Value) -> Sandbox {
@@ -528,7 +512,7 @@ fn hidden_wallet_approve_exports_only_the_public_exact_intent() {
 #[cfg(unix)]
 #[test]
 fn hidden_wallet_configure_keeps_an_expired_handoff_for_browser_recovery() {
-    use allowit_stellar_wallet::{self as sdk, AccountState};
+    use allowit_stellar_wallet as sdk;
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use sha2::{Digest, Sha256};
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -539,15 +523,8 @@ fn hidden_wallet_configure_keeps_an_expired_handoff_for_browser_recovery() {
     for path in [sandbox.work().join(".allowit"), journal.clone()] {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let state = AccountState {
-        address: sdk::account_for_seed(&[1; 32]),
-        sequence: 10,
-        master_weight: 1,
-        low_threshold: 0,
-        medium_threshold: 0,
-        high_threshold: 0,
-        signers: vec![],
-    };
+    let mut state = sdk::test_support::owner::fresh(&sdk::account_for_seed(&[1; 32]));
+    state.sequence = 10;
     let agent = sdk::account_for_seed(&[2; 32]);
     let engine = sdk::account_for_seed(&[3; 32]);
     let id = "cli-expired-stellar-setup-001";
