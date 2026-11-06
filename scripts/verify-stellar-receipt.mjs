@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { parseArgs, promisify } from "node:util";
 
@@ -67,12 +68,14 @@ async function strkey(account) {
 }
 
 async function verifyOriginalRequest(journalFile, expected) {
-  const record = JSON.parse(await readFile(journalFile, "utf8"));
-  const { request, config, policyId, prepared } = record;
+  const journalBytes = journalFile === "-" ? readFileSync(0) : await readFile(journalFile);
+  const record = JSON.parse(journalBytes);
+  const { request, config, policyId, prepared, backendOrigin } = record;
   requireMatch(typeof policyId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(policyId)
     && record.requestId === expected.requestId && config?.network === "stellar:testnet"
     && config.assetSymbol === "XLM" && config.assetIssuer === null && config.asset === nativeAssetContract
-    && hexBytes(prepared?.transactionHash) === expected.hash,
+    && hexBytes(prepared?.transactionHash) === expected.hash
+    && (!expected.origin || backendOrigin === expected.origin),
     "The retained journal does not bind this original Stellar Testnet XLM request and transaction");
   const nonce = createHash("sha256")
     .update("allowit-workflow-operation-v1\0").update(policyId).update("\0").update(record.requestId).digest("hex");
@@ -82,14 +85,21 @@ async function verifyOriginalRequest(journalFile, expected) {
   const instructions = request.input?.Instructions;
   const payment = instructions?.[0]?.StellarNativeTransfer;
   const effects = request.effect_bounds;
-  const asset = effects?.[0]?.asset?.Native;
+  const bound = effects?.[0];
+  const asset = bound?.asset?.Native;
   requireMatch(instructions?.length === 1 && payment && effects?.length === 1
     && asset?.chain === "Stellar" && hexBytes(asset.network) === testnetId
     && Number.isSafeInteger(payment.stroops) && BigInt(payment.stroops) === expected.value,
     "The original request does not specify this exact native XLM payment amount");
+  const maxDebit = hexBytes(bound.max_debit);
+  const minCredit = hexBytes(bound.min_credit);
+  requireMatch(maxDebit && minCredit && BigInt(`0x${maxDebit}`) === expected.value
+    && BigInt(`0x${minCredit}`) === expected.value,
+    "The retained effect bounds differ from the original XLM payment amount");
   const [source, recipient] = await Promise.all([strkey(payment.source), strkey(payment.destination)]);
   requireMatch(source === expected.source && recipient === expected.recipient && source === config.wallet,
     "The transfer parties differ from the original request and wallet");
+  return { policyId, journalSha256: createHash("sha256").update(journalBytes).digest("hex") };
 }
 
 async function decodeContractEvent(encoded) {
@@ -138,7 +148,7 @@ async function verifySorobanTransfer(result, operations, effects, source, recipi
 
 async function verify() {
   const { values: args } = parseArgs({
-    options: Object.fromEntries(argumentNames.map(name => [name, { type: "string" }])),
+    options: Object.fromEntries([...argumentNames, "origin"].map(name => [name, { type: "string" }])),
   });
   const { "request-id": requestId, "status-file": statusFile, hash, source, recipient, amount } = args;
   requireMatch(argumentNames.every(name => args[name]), `Required arguments: ${argumentNames.map(name => `--${name}`).join(" ")}`);
@@ -150,7 +160,9 @@ async function verify() {
   const status = statusFromDocument(JSON.parse(await readFile(statusFile, "utf8")));
   requireMatch(status.requestId === requestId && status.transactionHash === hash
     && status.status === "confirmed", "The original application request has no matching confirmed status");
-  await verifyOriginalRequest(args["journal-file"], { requestId, hash, source, recipient, value });
+  // Standalone verification proves the on-chain receipt. The recorder obtains the CLI status.
+  const journal = await verifyOriginalRequest(args["journal-file"],
+    { requestId, hash, source, recipient, value, origin: args.origin });
 
   const transactionUrl = `${horizon}/transactions/${hash}`;
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTransaction", params: { hash } });
@@ -180,7 +192,7 @@ async function verify() {
   }
 
   console.log(JSON.stringify({ requestId, transactionHash: hash, ledger: result.ledger,
-    source, recipient, amount, asset: "XLM", verified: true }));
+    source, recipient, amount, asset: "XLM", network: "stellar:testnet", ...journal, verified: true }));
 }
 
 verify().catch(error => {
