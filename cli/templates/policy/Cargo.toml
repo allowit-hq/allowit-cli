@@ -5,4 +5,4 @@ edition = "2024"
 publish = false
 
 [dependencies]
-allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["std"] }
+allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.2", version = "0.3", default-features = false, features = ["std"] }
