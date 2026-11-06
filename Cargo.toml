@@ -13,7 +13,7 @@ repository = "https://github.com/allowit-hq/allowit-cli"
 [workspace.dependencies]
 allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false, features = ["std"] }
 allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.1", version = "0.3", default-features = false }
-allowit-stellar-wallet = { git = "https://github.com/allowit-hq/allowit-contracts-stellar.git", rev = "5e34f65099dcfc7ccaa760848ebac23b61cab5ad", version = "0.3" }
+allowit-stellar-wallet = { git = "https://github.com/allowit-hq/allowit-contracts-stellar.git", rev = "9cf0f2e19c824a9c58226710aaebce4f3d76e659", version = "0.3" }
 
 # Every Allowit workspace uses this profile block, so a shared target directory
 # builds each shared crate once. Release builds keep overflow checks, which the
