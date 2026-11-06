@@ -26,8 +26,8 @@ source = "git+https://github.com/allowit-hq/allowit-core.git?tag=v0.3.1#96b55863
 name = "allowit-cli"
 version = "0.4.0"
 dependencies = [
- "allowit-sdk",
- "allowit-sdk-engine",
+ "allowit-sdk 0.3.1",
+ "allowit-sdk 0.5.0",
  "allowit-stellar-wallet",
  "base64 0.22.1",
  "clap",
@@ -68,12 +68,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "allowit-sdk-engine"
-version = "0.4.0"
-source = "git+https://github.com/allowit-hq/allowit-sdk.git?rev=d848c1bef9f3c959f3f136403729a0efe5c66d35#d848c1bef9f3c959f3f136403729a0efe5c66d35"
+name = "allowit-sdk"
+version = "0.5.0"
+source = "git+https://github.com/allowit-hq/allowit-sdk.git?rev=2583ac495b5058c4a37908dacabd81ef40896073#2583ac495b5058c4a37908dacabd81ef40896073"
 dependencies = [
  "allowit",
- "allowit-sdk",
+ "allowit-sdk 0.3.1",
  "allowit-stellar-wallet",
  "base64 0.22.1",
  "chrono",
@@ -96,7 +96,7 @@ version = "0.3.0"
 source = "git+https://github.com/allowit-hq/allowit-contracts-stellar.git?rev=5e34f65099dcfc7ccaa760848ebac23b61cab5ad#5e34f65099dcfc7ccaa760848ebac23b61cab5ad"
 dependencies = [
  "allowit",
- "allowit-sdk",
+ "allowit-sdk 0.3.1",
  "base64 0.22.1",
  "ed25519-dalek",
  "serde",
