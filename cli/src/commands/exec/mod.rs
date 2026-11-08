@@ -20,7 +20,7 @@ Examples:
 /// The request flags shared by `exec`.
 #[derive(clap::Args, Debug)]
 pub(crate) struct RequestArgs {
-    /// transfer, swap, deposit, redeem, custom, custom.FN or custom:CONTRACT.FN
+    /// An operation that `rail show` lists for the selected rail
     #[arg(long, value_name = "OP")]
     pub op: String,
     /// The recipient address, or the vault of a deposit or redeem
@@ -29,7 +29,7 @@ pub(crate) struct RequestArgs {
     /// Amount in the selected rail's asset format, or INTEGER base units; INTEGER vault shares for redeem
     #[arg(long, value_name = "AMOUNT")]
     pub amount: String,
-    /// The minimum to receive: ASSET:MIN for swap and redeem, INTEGER vault shares for deposit
+    /// The minimum to receive: ASSET:MIN for redeem, INTEGER vault shares for deposit
     #[arg(long, value_name = "MIN")]
     pub token_out: Option<String>,
     /// Call arguments as a JSON object, for custom operations
