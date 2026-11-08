@@ -22,7 +22,7 @@ It uses SDK engine for shared logic and the server REST API for server operation
 flowchart TB
     CLI["[allowit-cli]<br/>crate allowit-cli<br/>DX: policy and agent keypair generation<br/>Policy validation · x402 marketplace"]
     Server["[allowit-engine]<br/>crate @allowit/server<br/>Shared REST API · server enforcement"]
-    Engine["[allowit-sdk]<br/>crate @allowit/sdk/engine<br/>All other shared logic"]
+    Engine["[allowit-sdk]<br/>crate allowit-sdk<br/>All other shared logic"]
 
     CLI -. REST .-> Server
     CLI -->|crate| Engine
