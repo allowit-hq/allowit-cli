@@ -41,8 +41,9 @@ const EXIT_CODES: &str = "\
 Exit codes:
   0 ok, 1 internal error, 2 usage error, 3 configuration or not supported on
   this rail, 4 rejected by the contract, 5 uncertain (retry with the same ID),
-  6 replayed, 10 owner signature needed, 11 waiting for owner input,
-  12 pending, 20 denied by the policy, 130 interrupted";
+  6 replayed, 7 network unavailable (retry with the same ID), 10 owner
+  signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
+  policy, 130 interrupted";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Format {

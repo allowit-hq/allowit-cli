@@ -15,6 +15,8 @@ pub(crate) enum Exit {
     /// Uncertain or stale: retry with the same request ID.
     Uncertain = 5,
     Replayed = 6,
+    /// The network did not answer: retry with the same request ID.
+    NetworkUnavailable = 7,
     OwnerSignature = 10,
     OwnerInput = 11,
     Pending = 12,
@@ -39,6 +41,10 @@ pub(crate) const TABLE: &[(Exit, &str)] = &[
         "uncertain or stale: retry with the same ID",
     ),
     (Exit::Replayed, "replayed"),
+    (
+        Exit::NetworkUnavailable,
+        "network unavailable: retry with the same request ID",
+    ),
     (Exit::OwnerSignature, "owner signature needed"),
     (Exit::OwnerInput, "waiting for owner input"),
     (Exit::Pending, "pending"),
@@ -60,6 +66,7 @@ impl Exit {
             Exit::Rejected => "rejected",
             Exit::Uncertain => "uncertain",
             Exit::Replayed => "replayed",
+            Exit::NetworkUnavailable => allowit_sdk::transport_failure::NETWORK_UNAVAILABLE_NAME,
             Exit::OwnerSignature => "owner_signature",
             Exit::OwnerInput => "owner_input",
             Exit::Pending => "pending",
@@ -112,6 +119,15 @@ mod tests {
         ] {
             assert_eq!(execution_status(state).code(), code);
         }
+    }
+    #[test]
+    fn a_call_without_an_answer_has_its_own_exit_code() {
+        let error = allowit_sdk::transport_failure::network_unavailable("rail RPC");
+        let exit = Exit::from_code(error.code);
+        assert_eq!(exit, Exit::NetworkUnavailable);
+        assert_eq!((exit.code(), exit.name()), (7, "network_unavailable"));
+        assert_ne!(exit, Exit::Config);
+        assert_ne!(exit, Exit::Rejected);
     }
     #[test]
     fn table_codes_are_unique_and_round_trip() {

@@ -104,6 +104,7 @@ After uncertain generation, inspect the owner workspace before creating another 
 | 4 | rejected by the contract (paused, wrong asset) | ask the owner |
 | 5 | uncertain | preserve the original operation; inspect an uncertain generation before creating another |
 | 6 | replayed | the earlier result stands |
+| 7 | network unavailable | check the network, then retry with the same request ID |
 | 10 | owner signature needed | the owner opens the printed link |
 | 11 | waiting for owner input | stop and report the prompt |
 | 12 | pending | `allowit status ID --wait 60s` |
