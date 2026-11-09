@@ -324,8 +324,8 @@ mod tests {
         assert_eq!(out.stdout, "{\n  \"name\": \"agent\"\n}\n");
         let mut out = plain(false);
         out.value(&json!({
-            "rail": "stellar:testnet",
-            "config": {"rail": "stellar:testnet", "rails": {}},
+            "rail": "example:testnet",
+            "config": {"rail": "example:testnet", "rails": {}},
             "keys": ["a", "b"],
             "steps": [{"name": "fund"}],
             "none": null,
@@ -336,8 +336,8 @@ mod tests {
         assert!(serde_json::from_str::<Value>(&text).is_err());
         assert_eq!(out.kind, Kind::Text);
         for (key, value) in [
-            ("rail", "stellar:testnet"),
-            ("config.rail", "stellar:testnet"),
+            ("rail", "example:testnet"),
+            ("config.rail", "example:testnet"),
             ("config.rails", "-"),
             ("keys", "a, b"),
             ("steps.0.name", "fund"),

@@ -60,11 +60,11 @@ allowit guide
 allowit version
 ```
 
-## Vendors and build output
+## Rails and build output
 
-The [workspace manifest](../Cargo.toml) selects vendor dependencies. The [lockfile](../Cargo.lock) fixes their source revisions.
-The [SDK registry](https://github.com/allowit-hq/allowit-sdk/blob/a2e50c4722fd82a7803c0bb1c78de5c2858a664f/engine/src/vendors/mod.rs) selects compiled vendor bindings. Vendor libraries supply native network identities. SDK adapters register friendly aliases and asset defaults.
-[CLI adapter wiring](src/vendors/mod.rs) calls the shared capabilities. Adding a dependency alone does not make a vendor available.
+The CLI depends only on the AllowIt SDK and names no vendor. The [workspace manifest](../Cargo.toml) pins the SDK. The [lockfile](../Cargo.lock) fixes its source revision and the vendor plugins that it registers.
+The [SDK plugin registration](https://github.com/allowit-hq/allowit-sdk/blob/vendor-plugin-separation/crates/allowit-sdk/src/plugins/registered.rs) is the one place that lists vendor plugins. Each plugin supplies its network identities, aliases, assets and native behavior.
+[`src/rails.rs`](src/rails.rs) is one generic adapter for every registered rail. It reaches each rail through the SDK registry.
 
 ```sh
 allowit version
@@ -75,7 +75,7 @@ allowit rail show RAIL --json
 Use the installed build's output instead of a copied rail list.
 `rail ls` reports identifiers, aliases, family, Testnet status and the current selection.
 `rail show` reports supported operations, available/unavailable commands, signing curve, asset metadata and local selections.
-Use the selected [adapter's instructions](src/vendors/) for its public profile and native input formats.
+The selected rail's vendor plugin documents its public profile and native input formats.
 Runtime configuration does not install another vendor.
 Printed CLI examples use the effective selected rail, then the first rail in build order.
 Reading help or the guide does not create settings or inspect private keys.
@@ -134,7 +134,7 @@ After uncertain generation (exit 5), inspect the owner workspace before submitti
 
 Use `policy export` after activation, or `wallet import FILE --rpc-url URL` for a verified public export from another device.
 Then inspect it with `wallet show` and `policy show`.
-Each [adapter reference](src/vendors/) describes its public profile configuration and native request formats.
+Each vendor plugin describes its public profile configuration and native request formats.
 [Known issues](../known_issues.md) describes compatibility with older exports.
 `ALLOWIT_URL` selects the server origin for owner requests and profile import.
 The SDK retains that origin with each cached profile. Selecting an address does not fetch or import a profile.
@@ -170,12 +170,14 @@ Data goes to stdout. Diagnostics and generated request IDs go to stderr.
 ## Source layout
 
 - `src/commands/` owns command arguments, examples and terminal interaction.
-- [`src/vendors/`](src/vendors/) connects commands to registered rail libraries and validates their native input formats.
+- [`src/rails.rs`](src/rails.rs) connects commands to the rails that the SDK registers. Address and amount checks come from the SDK.
 - `src/settings/` owns caller configuration, private keys and local request records.
 - `src/ctx.rs` resolves caller settings. `src/term.rs` renders output.
 - [`templates/policy/`](templates/policy/) contains the policy crate. [`skills/allowit/`](skills/allowit/SKILL.md) describes authoring.
 
-Help snapshots live in `tests/snapshots/help/`.
+Help snapshots live in `tests/snapshots/help/`. They show `<rail>` in place of each registered rail identifier.
+Shared tests run once for each registered rail and take every address, asset and profile from the rail's fixtures. A rail skips a test of a feature that it does not serve.
+`node scripts/vendor-boundary.mjs` fails when a vendor name enters this repository; `cargo test` runs it.
 After an intended command change, run `ALLOWIT_UPDATE_SNAPSHOTS=1 cargo test -p allowit-cli --test help`.
 
 ## Deploy, activate and export
@@ -209,4 +211,4 @@ SDK engine controls submission and original-hash recovery. Keys remain with the 
 
 Portable policy source uses `pub fn execute(ctx: &AllowitContext) -> allowit::Result`.
 Owner params supply configuration. Authenticated request facts and committed state come from the host and rail.
-See the [portable policy reference](../docs/policy-reference.md) and the selected [adapter reference](src/vendors/).
+See the [portable policy reference](../docs/policy-reference.md) and the selected rail's vendor plugin.

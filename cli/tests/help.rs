@@ -33,7 +33,7 @@ fn data_lines_refuse_prose() {
         "name     agent\naddress  GABC\nsource\n  fn a() {}\n",
         "data",
     );
-    common::assert_data("NAME   RAIL\nagent  stellar:testnet\n", "table");
+    common::assert_data("NAME   RAIL\nagent  example:testnet\n", "table");
     common::assert_data("* CWALLET\n  COTHER\n", "list");
 }
 
@@ -135,6 +135,21 @@ fn offline_help_examples_run_and_print_only_data() {
     }
 }
 
+/// Replaces every registered rail identifier with `<rail>`, so a snapshot
+/// holds no vendor name and stays the same whichever rails the SDK registers.
+fn with_rail_placeholder(mut text: String) -> String {
+    let mut names: Vec<&str> = allowit_sdk::routing::all()
+        .iter()
+        .flat_map(|rail| std::iter::once(rail.id).chain(rail.aliases.iter().copied()))
+        .collect();
+    // Longer names first, so an identifier that contains another stays whole.
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    for name in names {
+        text = text.replace(name, "<rail>");
+    }
+    text
+}
+
 #[test]
 fn every_help_node_matches_its_snapshot() {
     let update = std::env::var_os("ALLOWIT_UPDATE_SNAPSHOTS").is_some();
@@ -169,6 +184,7 @@ fn every_help_node_matches_its_snapshot() {
         if !text.contains("\nCommands:\n") {
             continue;
         }
+        let text = with_rail_placeholder(text);
         let name = file_name(path);
         let file = dir.join(&name);
         expected_files.insert(name.clone());
@@ -243,7 +259,7 @@ fn unknown_commands_exit_2_and_list_the_commands_at_that_level() {
         "{error}"
     );
     // A global flag's value is not read as a command name.
-    let output = sandbox.run(&["--rail", "stellar:testnet", "policy", "mystery"]);
+    let output = sandbox.run(&["--rail", "example:testnet", "policy", "mystery"]);
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8(output.stderr).unwrap();
     for verb in ["show", "check", "build"] {

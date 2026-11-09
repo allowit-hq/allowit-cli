@@ -3,7 +3,7 @@ AllowIt: policy wallets for agents. Go on. On your terms.
 Usage: allowit [OPTIONS] [COMMAND]
 
 Examples:
-  allowit rail use stellar:testnet
+  allowit rail use <rail>
   allowit keys generate agent
   allowit exec --op transfer --to DESTINATION --amount ASSET:5
   allowit status pay-0001 --wait 60s

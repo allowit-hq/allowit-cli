@@ -4,7 +4,7 @@ use crate::{
     error::{Error, Result},
     owner,
 };
-use allowit_sdk_engine::owner as shared;
+use allowit_sdk::owner as shared;
 use std::path::PathBuf;
 pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --request-id deploy-0001 --fee-limit 2000000000 --yes";
 #[derive(clap::Args, Debug)]

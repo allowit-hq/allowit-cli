@@ -54,8 +54,8 @@ The [policy template](../cli/templates/policy/) type-checks authored source as a
 
 ## Native binding
 
-The Stellar rail derives the exact native request, effect and fee bounds, authorizers, simulation and settlement rules.
-Its Simple, Common and Custom wallet implementations bind source, code and owner configuration.
+The selected rail's vendor plugin derives the exact native request, effect and fee bounds, authorizers, simulation and settlement rules.
+Its wallet implementations bind source, code and owner configuration.
 Common uses the owner-approved leading canonical rule calls. Custom compiles the complete portable source.
 Simple requires full trusted host evaluation before the server authorizes execution.
 Simple and Common reject bespoke state writes.

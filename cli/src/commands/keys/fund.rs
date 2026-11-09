@@ -14,6 +14,6 @@ pub(crate) struct Args {
 
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let key = cx.key(&args.name)?;
-    let vendor = cx.vendor()?;
-    vendor.keys_fund(cx, &key)
+    let adapter = cx.adapter()?;
+    adapter.keys_fund(cx, &key)
 }

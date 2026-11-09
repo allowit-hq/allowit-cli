@@ -4,19 +4,20 @@ An AllowIt policy wallet holds funds. Its policy decides what the agent key may
 spend. Your agent key signs requests. The server and rail enforce the installed
 policy and native authority before settlement.
 
-## Vendors and this build
+## Rails and this build
 
-A vendor adapter connects the common commands to a rail's native protocol.
-The SDK engine shares execution and recovery across CLI and server callers.
-Rail libraries own native encoding, signatures, simulation and settlement.
-Core supplies portable policy types and common transport and storage primitives.
+The CLI names no rail. The SDK registers each vendor plugin, and the CLI
+reaches every rail through that registry with one generic adapter.
+The SDK shares execution and recovery across CLI and server callers.
+Vendor plugins own native encoding, signatures, simulation and settlement.
+Core supplies the plugin contract, portable policy types and common transport
+and storage primitives.
 
 The [workspace manifest](https://github.com/allowit-hq/allowit-cli/blob/main/Cargo.toml)
 and [lockfile](https://github.com/allowit-hq/allowit-cli/blob/main/Cargo.lock)
-select vendor dependencies and their exact source versions.
-The [rail table](https://github.com/allowit-hq/allowit-sdk/blob/main/engine/src/routing.rs)
-and [adapter wiring](https://github.com/allowit-hq/allowit-cli/blob/main/cli/src/vendors/mod.rs)
-register them in the executable. Adding a Cargo dependency alone does not register an adapter.
+select the SDK and its exact source version.
+The [SDK plugin registration](https://github.com/allowit-hq/allowit-sdk/blob/main/crates/allowit-sdk/src/plugins/registered.rs)
+lists the rails in the executable.
 These links describe the source checkout. Inspect your installed build with the commands below.
 
 ## 1. Inspect and select a rail
@@ -33,9 +34,9 @@ This output is the installed build's inventory, including canonical identifiers 
 `rail show` reports its operations, available commands, key curve and asset metadata.
 A command that needs a rail exits 3 until one is selected.
 
-Use the selected [adapter's configuration](https://github.com/allowit-hq/allowit-cli/tree/main/cli/src/vendors)
-for its public wallet profile, address formats and native asset syntax.
-Vendor-specific profile inputs belong to adapter configuration, not the common command contract.
+The selected rail's vendor plugin defines its public wallet profile, address
+formats and native asset syntax. Vendor-specific inputs belong to the plugin,
+not the common command contract.
 See [known issues](https://github.com/allowit-hq/allowit-cli/blob/main/known_issues.md) for profile and native-binding workarounds.
 `ALLOWIT_URL` selects the server origin.
 

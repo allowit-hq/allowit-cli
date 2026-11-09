@@ -14,7 +14,8 @@ cargo run --locked --bin allowit -- --help
 
 See the [CLI reference](cli/README.md), [portable policy reference](docs/policy-reference.md) and [known issues](known_issues.md).
 The CLI consumes the pinned [Allowit SDK](https://github.com/allowit-hq/allowit-sdk) for shared execution and owner workflows.
-The `engine/tests/` directory contains shared test inputs only.
+The CLI names no vendor. It reaches every rail through the SDK plugin registry.
+`node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs` checks that boundary; `cargo test` runs it.
 
 ## Architecture
 

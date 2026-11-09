@@ -77,8 +77,8 @@ impl Exit {
 }
 
 /// Convert shared execution state to the process contract owned by this CLI.
-pub(crate) fn execution_status(status: allowit_sdk_engine::runtime::Status) -> Exit {
-    use allowit_sdk_engine::runtime::Status;
+pub(crate) fn execution_status(status: allowit_sdk::runtime::Status) -> Exit {
+    use allowit_sdk::runtime::Status;
     match status {
         Status::Confirmed => Exit::Ok,
         Status::Failed => Exit::Denied,
@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     #[test]
     fn execution_states_keep_the_existing_cli_codes() {
-        use allowit_sdk_engine::runtime::Status;
+        use allowit_sdk::runtime::Status;
         for (state, code) in [
             (Status::Confirmed, 0),
             (Status::Failed, 20),
@@ -120,7 +120,7 @@ mod tests {
             assert!(TABLE[..i].iter().all(|(e, _)| e.code() != exit.code()));
         }
         assert_eq!(Exit::from_code(99), Exit::Internal);
-        assert_eq!(not_available("wallet close", "stellar:testnet").code, 3);
+        assert_eq!(not_available("wallet close", "example:testnet").code, 3);
         assert_eq!(no_rail().code, 3);
         assert_eq!(Exit::Denied.name(), "denied");
         for (status, code) in [(401, 3), (403, 3), (404, 4), (500, 4)] {

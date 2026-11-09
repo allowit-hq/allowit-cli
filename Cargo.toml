@@ -7,18 +7,16 @@ members = ["cli", "cli/templates/policy"]
 version = "0.4.0"
 repository = "https://github.com/allowit-hq/allowit-cli"
 
-# Dependencies point one way: this CLI depends on Allowit core and on the rail
-# crates, and the rail crates depend on Allowit core. Every crate in the build
-# must name the same core release, so Cargo builds one copy of core.
+# Dependencies point one way: this CLI depends only on the AllowIt SDK. The
+# SDK registers every vendor plugin and pins one core release, so the CLI
+# never names a vendor crate and Cargo builds one copy of core.
 [workspace.dependencies]
-allowit = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.2", version = "0.3", default-features = false, features = ["std"] }
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-core.git", tag = "v0.3.2", version = "0.3", default-features = false }
-allowit-stellar-wallet = { package = "allowit-stellar", git = "https://github.com/allowit-hq/allowit-contracts-stellar.git", rev = "82787fa4e19089206072257cab6a39f121e67c4a", version = "0.3" }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-sdk.git", rev = "3573efa2667ec2c7abda0d3886db989ea36debb6" }
 
 # Every Allowit workspace uses this profile block, so a shared target directory
 # builds each shared crate once. Release builds keep overflow checks, which the
-# portable policy library requires, and the Soroban contract settings; the Wasm
-# targets abort on panic by default.
+# portable policy library requires, and the contract settings; the Wasm targets
+# abort on panic by default.
 [profile.dev]
 debug = "line-tables-only"
 incremental = false

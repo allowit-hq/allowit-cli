@@ -9,7 +9,7 @@ pub(crate) struct Args {
 pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let rail = cx.rail()?;
     let authority =
-        allowit_sdk_engine::config::ServerAuthority::new(rail.id, &a.origin, &a.public_key)?;
+        allowit_sdk::config::ServerAuthority::new(rail.id, &a.origin, &a.public_key)?;
     cx.settings()?.update(|config| {
         config
             .rail_mut(rail.id)

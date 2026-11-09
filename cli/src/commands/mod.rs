@@ -233,7 +233,7 @@ pub(crate) fn command() -> clap::Command {
 fn compiled_ops() -> Vec<&'static str> {
     let mut ops = vec![];
     for rail in crate::routing::all() {
-        for op in crate::vendors::rail(rail).caps().ops {
+        for op in crate::rails::rail(rail).caps().ops {
             if !ops.contains(op) {
                 ops.push(*op);
             }
@@ -444,9 +444,9 @@ mod tests {
         for line in [
             "keys use agent --json",
             "--output json policy build policy.rs -o out.rs",
-            "rail show stellar:pubnet --rail stellar:testnet",
-            "rail use stellar:testnet --json",
-            "exec --op transfer --to G --amount 1 --wallet C --rail stellar:testnet",
+            "rail show example:mainnet --rail example:testnet",
+            "rail use example:testnet --json",
+            "exec --op transfer --to G --amount 1 --wallet C --rail example:testnet",
             "--json status pay-0001 --wait 5s",
         ] {
             assert!(
@@ -455,12 +455,12 @@ mod tests {
             );
         }
         let Parsed::Run(cli) = parse(
-            &argv("rail show stellar:pubnet --rail stellar:testnet"),
+            &argv("rail show example:mainnet --rail example:testnet"),
             false,
         ) else {
             unreachable!()
         };
-        assert_eq!(cli.global.rail.as_deref(), Some("stellar:testnet"));
+        assert_eq!(cli.global.rail.as_deref(), Some("example:testnet"));
         assert!(cli.global.rail_flag);
         assert!(!cli.global.wallet_flag);
     }

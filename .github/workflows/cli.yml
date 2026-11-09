@@ -3,7 +3,8 @@ on:
   pull_request:
     paths:
       - "cli/**"
-      - "engine/tests/**"
+      - "scripts/**"
+      - "vendor-boundary.json"
       - "docs/examples/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -23,6 +24,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Vendor-boundary eval
+        run: node scripts/vendor-boundary.mjs --self-test && node scripts/vendor-boundary.mjs && node scripts/vendor-boundary.mjs --probe
       - run: cargo fmt --all --check
       - run: cargo test --locked -p allowit-cli
       - run: cargo test --locked -p allowit-policy-template
