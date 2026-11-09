@@ -94,7 +94,7 @@ fn rail_aliases_and_settings_stay_bound_to_the_selected_network() {
 
 #[test]
 fn keys_keep_private_material_out_of_public_metadata() {
-    every_rail(|rail| keys_on(rail));
+    every_rail(keys_on);
 }
 
 fn keys_on(rail: &Rail<'_>) {
