@@ -1,16 +1,18 @@
 //! The `allowit` command. Argument parsing, terminal output and rail adapters
 //! live here; engine requests and service composition come from
 //! `allowit-sdk-engine`, which has no terminal I/O.
-pub use allowit_sdk_engine::{VERSION, error, wallet};
-pub(crate) use allowit_sdk_engine::{config, output, request};
+pub use allowit_sdk::{error, wallet};
+/// This CLI's own release version.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) use allowit_sdk::{config, output, request};
 mod commands;
 mod ctx;
 mod exit;
 mod owner;
+mod rails;
 mod routing;
 mod settings;
 mod term;
-pub mod vendors;
 use crate::{config::env_value, error::Error, exit::Exit, term::Out};
 use serde_json::{Value, json};
 use std::io::Write;
@@ -142,21 +144,7 @@ fn execute(cli: commands::Cli) -> i32 {
         cx.out.detail(format!("rail  {n}"));
         cx.out.detail(format!("config  {}", dir.display()));
     }
-    let settings = match &network {
-        Some(n) => {
-            match routing::info(n)
-                .map(vendors::rail)
-                .and_then(|v| v.settings(&mut cx))
-            {
-                Ok(settings) => settings,
-                Err(e) => return finish(cx.out, Err(e)),
-            }
-        }
-        _ => vec![],
-    };
-    let result = routing::with_network(network, || {
-        config::with_settings(&settings, || commands::dispatch(command, &mut cx))
-    });
+    let result = routing::with_network(network, || commands::dispatch(command, &mut cx));
     finish(cx.out, result)
 }
 

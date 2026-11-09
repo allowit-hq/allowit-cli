@@ -13,6 +13,6 @@ pub(crate) struct Args {}
 pub(crate) fn run(_: Args, cx: &mut Ctx) -> Result<i32> {
     let rail = cx.rail()?;
     let wallet = cx.wallet(rail)?;
-    let vendor = cx.vendor()?;
-    vendor.wallet_show(cx, wallet.as_deref())
+    let adapter = cx.adapter()?;
+    adapter.wallet_show(cx, wallet.as_deref())
 }

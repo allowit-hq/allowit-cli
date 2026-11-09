@@ -4,7 +4,7 @@ Usage: allowit rail [OPTIONS] <COMMAND>
 
 Examples:
   allowit rail ls
-  allowit rail use stellar:testnet
+  allowit rail use <rail>
   allowit rail show
 
 Commands:

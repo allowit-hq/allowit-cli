@@ -5,10 +5,10 @@ use crate::{
     commands::Global,
     error::{Error, Result, quoted},
     exit,
+    rails::{self, Rail},
     routing::{self, RailInfo},
     settings::{self, Settings, keys},
     term::Out,
-    vendors::{self, Rail},
 };
 use std::{
     io::IsTerminal,
@@ -74,9 +74,9 @@ impl Ctx {
     pub(crate) fn rail(&mut self) -> Result<&'static RailInfo> {
         self.rail_opt()?.ok_or_else(exit::no_rail)
     }
-    /// The vendor adapter of the selected rail.
-    pub(crate) fn vendor(&mut self) -> Result<Box<dyn Rail>> {
-        Ok(vendors::rail(self.rail()?))
+    /// The command adapter of the selected rail.
+    pub(crate) fn adapter(&mut self) -> Result<Rail> {
+        Ok(rails::rail(self.rail()?))
     }
     /// The wallet: `--wallet`, `ALLOWIT_WALLET`, then `wallet use`. The
     /// address must match the rail.
@@ -86,7 +86,7 @@ impl Ctx {
             None => self.settings()?.rail(rail.id).wallet,
         };
         if let Some(w) = &wallet {
-            vendors::address::check_wallet(rail.family, w)?;
+            rails::address::check_wallet(rail.family, w)?;
         }
         Ok(wallet)
     }
@@ -121,10 +121,10 @@ impl Ctx {
     pub(crate) fn server_authority(
         &mut self,
         rail: &RailInfo,
-    ) -> Result<allowit_sdk_engine::config::ServerAuthority> {
+    ) -> Result<allowit_sdk::config::ServerAuthority> {
         let origin = crate::config::parse_origin(&crate::config::env_value("ALLOWIT_URL"))?;
         let key=self.settings()?.rail(rail.id).server_authorities.get(&origin).cloned().ok_or_else(||Error::config("Configure independent server authority with allowit rail trust ORIGIN PUBLIC_KEY"))?;
-        allowit_sdk_engine::config::ServerAuthority::new(rail.id, &origin, &key)
+        allowit_sdk::config::ServerAuthority::new(rail.id, &origin, &key)
     }
     /// Confirms a destructive action: `--yes`, or a prompt on a terminal.
     pub(crate) fn confirm(&mut self, question: &str) -> Result<()> {

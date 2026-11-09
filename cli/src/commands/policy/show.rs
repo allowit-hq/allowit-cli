@@ -15,6 +15,6 @@ pub(crate) struct Args {
 }
 
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
-    let vendor = cx.vendor()?;
-    vendor.policy_show(cx, args.source)
+    let adapter = cx.adapter()?;
+    adapter.policy_show(cx, args.source)
 }

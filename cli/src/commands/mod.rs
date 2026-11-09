@@ -41,8 +41,9 @@ const EXIT_CODES: &str = "\
 Exit codes:
   0 ok, 1 internal error, 2 usage error, 3 configuration or not supported on
   this rail, 4 rejected by the contract, 5 uncertain (retry with the same ID),
-  6 replayed, 10 owner signature needed, 11 waiting for owner input,
-  12 pending, 20 denied by the policy, 130 interrupted";
+  6 replayed, 7 network unavailable (retry with the same ID), 10 owner
+  signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
+  policy, 130 interrupted";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Format {
@@ -214,7 +215,32 @@ pub(crate) fn command() -> clap::Command {
             cmd
         }
     }
-    layout(Cli::command())
+    layout(Cli::command()).mut_subcommand("exec", |exec| {
+        let ops = compiled_ops();
+        if ops.is_empty() {
+            return exec;
+        }
+        exec.mut_arg("op", |op| {
+            op.help(format!(
+                "{}; rail show lists the selected rail's operations",
+                ops.join(", ")
+            ))
+        })
+    })
+}
+
+/// The operations that the compiled rails admit, in build order. `exec`
+/// help names these, so it never offers an operation that no rail serves.
+fn compiled_ops() -> Vec<&'static str> {
+    let mut ops = vec![];
+    for rail in crate::routing::all() {
+        for op in crate::rails::rail(rail).caps().ops {
+            if !ops.contains(op) {
+                ops.push(*op);
+            }
+        }
+    }
+    ops
 }
 
 pub(crate) enum Parsed {
@@ -419,9 +445,9 @@ mod tests {
         for line in [
             "keys use agent --json",
             "--output json policy build policy.rs -o out.rs",
-            "rail show stellar:pubnet --rail stellar:testnet",
-            "rail use stellar:testnet --json",
-            "exec --op transfer --to G --amount 1 --wallet C --rail stellar:testnet",
+            "rail show example:mainnet --rail example:testnet",
+            "rail use example:testnet --json",
+            "exec --op transfer --to G --amount 1 --wallet C --rail example:testnet",
             "--json status pay-0001 --wait 5s",
         ] {
             assert!(
@@ -430,14 +456,61 @@ mod tests {
             );
         }
         let Parsed::Run(cli) = parse(
-            &argv("rail show stellar:pubnet --rail stellar:testnet"),
+            &argv("rail show example:mainnet --rail example:testnet"),
             false,
         ) else {
             unreachable!()
         };
-        assert_eq!(cli.global.rail.as_deref(), Some("stellar:testnet"));
+        assert_eq!(cli.global.rail.as_deref(), Some("example:testnet"));
         assert!(cli.global.rail_flag);
         assert!(!cli.global.wallet_flag);
+    }
+    #[test]
+    fn the_readme_lists_every_visible_command() {
+        let readme = include_str!("../../README.md");
+        let block = readme
+            .split("## Commands\n\n```\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n```").next())
+            .expect("cli/README.md has a Commands block");
+        fn walk(cmd: &clap::Command, prefix: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+            let visible: Vec<_> = cmd
+                .get_subcommands()
+                .filter(|c| !c.is_hide_set() && c.get_name() != "help")
+                .collect();
+            if visible.is_empty() && !prefix.is_empty() {
+                out.push(prefix.clone());
+            }
+            for sub in visible {
+                prefix.push(sub.get_name().to_owned());
+                walk(sub, prefix, out);
+                prefix.pop();
+            }
+        }
+        let mut leaves = vec![];
+        let mut root = command();
+        root.build();
+        walk(&root, &mut vec![], &mut leaves);
+        let missing: Vec<String> = leaves
+            .iter()
+            .map(|path| path.join(" "))
+            .filter(|path| {
+                let (group, name) = path.rsplit_once(' ').unwrap_or(("", path));
+                let lead = format!("allowit {group}").trim_end().to_owned();
+                // One line may list several commands: `allowit keys ls | show NAME`.
+                !block.lines().any(|line| {
+                    line.strip_prefix(&lead).is_some_and(|rest| {
+                        let mut words = rest.split(|c: char| c.is_whitespace() || c == '|');
+                        match (words.next(), group.is_empty()) {
+                            (Some(""), true) => words.next() == Some(name),
+                            (Some(""), false) => words.any(|word| word == name),
+                            _ => false,
+                        }
+                    })
+                })
+            })
+            .collect();
+        assert!(missing.is_empty(), "cli/README.md omits {missing:?}");
     }
     #[test]
     fn waits_parse_and_are_bounded() {

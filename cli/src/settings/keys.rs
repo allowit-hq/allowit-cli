@@ -167,8 +167,8 @@ pub(crate) fn add(dir: &Path, name: &str, rail: &str, address: &str) -> Result<K
     let _lock = super::lock(dir)?;
     refuse_existing(dir, name)?;
     let info = routing::info(rail)?;
-    crate::vendors::address::check_account(info.family, address)?;
-    let caps = crate::vendors::rail(info).caps();
+    crate::rails::address::check_account(info.family, address)?;
+    let caps = crate::rails::rail(info).caps();
     let key = Key {
         name: name.into(),
         rail: info.id.into(),
@@ -275,68 +275,78 @@ mod tests {
     fn unknown_rail_writes_no_key() {
         let dir = crate::settings::temp_dir("unbuilt-keys");
         let secret = b"[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]";
+        assert_eq!(generate(&dir, "a", "example:unknown").unwrap_err().code, 2);
         assert_eq!(
-            generate(&dir, "a", "stellar:futurenet").unwrap_err().code,
-            2
-        );
-        assert_eq!(
-            import_secret(&dir, "b", "stellar:futurenet", secret)
+            import_secret(&dir, "b", "example:unknown", secret)
                 .unwrap_err()
                 .code,
             2
         );
         assert!(!dir.join("secrets").exists() && !dir.join("keys").exists());
     }
+    /// Runs on every registered rail, on its test network and on a second
+    /// network of the same rail when it has one.
     #[test]
     fn generate_add_import_and_remove_keep_secrets_private() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = crate::settings::temp_dir("keys");
-        let agent = generate(&dir, "agent", "stellar:testnet").unwrap();
-        assert!(agent.address.starts_with('G'));
-        assert_eq!(agent.public_key.as_deref(), Some(agent.address.as_str()));
-        assert_eq!(agent.curve, "ed25519");
-        let mode = std::fs::metadata(secret_path(&dir, "agent"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
-        let mode = std::fs::metadata(dir.join("secrets"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o700);
-        let metadata = std::fs::read_to_string(metadata_path(&dir, "agent")).unwrap();
-        let secret = read_secret(&dir, &agent).unwrap();
-        assert!(!metadata.contains(secret.trim()));
-        assert_eq!(
-            generate(&dir, "agent", "stellar:testnet").unwrap_err().code,
-            3
+        assert!(
+            !allowit_sdk::plugins::rails().is_empty(),
+            "no registered rail"
         );
-
-        let copy = import_secret(&dir, "copy", "stellar:pubnet", secret.as_bytes()).unwrap();
-        assert_eq!(copy.address, agent.address);
-        assert_eq!(copy.rail, "stellar:pubnet");
-        assert!(import_secret(&dir, "bad", "stellar:testnet", b"not a key").is_err());
-        assert!(!secret_path(&dir, "bad").exists());
-
-        let owner = add(&dir, "owner", "stellar:testnet", &agent.address).unwrap();
-        assert!(!owner.secret);
-        assert!(signer_path(&dir, &owner).is_err());
-        assert!(add(&dir, "other", "stellar:testnet", "GBAD").is_err());
-
-        assert_eq!(
-            list(&dir)
-                .unwrap()
-                .0
+        for plugin in allowit_sdk::plugins::rails() {
+            let support = plugin.test_support();
+            let fixtures = (support.fixtures)();
+            let net = support.network;
+            let other = plugin
+                .networks()
                 .iter()
-                .map(|k| k.name.as_str())
-                .collect::<Vec<_>>(),
-            ["agent", "copy", "owner"]
-        );
-        remove(&dir, "agent").unwrap();
-        assert!(!secret_path(&dir, "agent").exists());
-        assert!(load(&dir, "agent").is_err());
+                .map(|n| n.id)
+                .find(|id| *id != net)
+                .unwrap_or(net);
+            let dir = crate::settings::temp_dir(&format!("keys-{}", plugin.id()));
+            let agent = generate(&dir, "agent", net).unwrap();
+            let family = routing::family(net).unwrap();
+            crate::rails::address::check_account(family, &agent.address).unwrap();
+            let mode = std::fs::metadata(secret_path(&dir, "agent"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+            let mode = std::fs::metadata(dir.join("secrets"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700);
+            let metadata = std::fs::read_to_string(metadata_path(&dir, "agent")).unwrap();
+            let secret = read_secret(&dir, &agent).unwrap();
+            assert!(!metadata.contains(secret.trim()));
+            assert_eq!(generate(&dir, "agent", net).unwrap_err().code, 3);
+
+            let copy = import_secret(&dir, "copy", other, secret.as_bytes()).unwrap();
+            assert_eq!(copy.address, agent.address);
+            assert_eq!(copy.rail, other);
+            assert!(import_secret(&dir, "bad", net, b"not a key").is_err());
+            assert!(!secret_path(&dir, "bad").exists());
+
+            let owner = add(&dir, "owner", net, &agent.address).unwrap();
+            assert!(!owner.secret);
+            assert!(signer_path(&dir, &owner).is_err());
+            assert!(add(&dir, "other", net, &fixtures.invalid_address).is_err());
+
+            assert_eq!(
+                list(&dir)
+                    .unwrap()
+                    .0
+                    .iter()
+                    .map(|k| k.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["agent", "copy", "owner"]
+            );
+            remove(&dir, "agent").unwrap();
+            assert!(!secret_path(&dir, "agent").exists());
+            assert!(load(&dir, "agent").is_err());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
         assert!(valid_name("../x").is_err());
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -5,7 +5,7 @@
 //! folders is one private store of at most 1,000 records, so the journal
 //! holds up to 256,000 requests.
 use crate::error::{Error, Result};
-use allowit_sdk_engine::Store;
+use allowit_sdk::Store;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -35,7 +35,7 @@ pub(crate) struct Entry {
 
 /// The folder of one request ID.
 fn shard(id: &str) -> String {
-    allowit_sdk_engine::digest(id.as_bytes())[..2].to_owned()
+    allowit_sdk::digest(id.as_bytes())[..2].to_owned()
 }
 
 fn open_shard(dir: &Path, shard: &str) -> Result<Store> {
@@ -162,12 +162,12 @@ mod tests {
         Entry {
             request_id: id.into(),
             command: "exec".into(),
-            rail: "stellar:testnet".into(),
+            rail: "example:testnet".into(),
             wallet: Some("CWALLET".into()),
             policy: Some("policy-1@digest".into()),
             op: "transfer".into(),
             to: "GDEST".into(),
-            amount: "XLM:5".into(),
+            amount: "ASSET:5".into(),
             profile_version: None,
             server_origin: None,
             created_at: at,
@@ -185,12 +185,12 @@ mod tests {
         type Change = (&'static str, fn(&mut Entry));
         let changes: [Change; 7] = [
             ("command", |e| e.command = "status".into()),
-            ("rail", |e| e.rail = "stellar:pubnet".into()),
+            ("rail", |e| e.rail = "example:mainnet".into()),
             ("wallet", |e| e.wallet = Some("COTHER".into())),
             ("policy", |e| e.policy = Some("policy-2@digest".into())),
             ("op", |e| e.op = "swap".into()),
             ("to", |e| e.to = "GOTHER".into()),
-            ("amount", |e| e.amount = "XLM:6".into()),
+            ("amount", |e| e.amount = "ASSET:6".into()),
         ];
         for (field, change) in changes {
             let mut other = entry("pay-0001", 10);
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(all.len(), 1_001);
         assert_eq!(all[0].request_id, "pay-01000");
         let mut other = entry("pay-00007", 7);
-        other.amount = "XLM:6".into();
+        other.amount = "ASSET:6".into();
         assert_eq!(record(&dir, &other).unwrap_err().code, 2);
         assert_eq!(load(&dir, "pay-00007").unwrap().unwrap().created_at, 7);
         std::fs::remove_dir_all(dir).unwrap();

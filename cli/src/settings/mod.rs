@@ -203,15 +203,15 @@ mod tests {
         let mut s = Settings::load(dir.clone()).unwrap();
         assert_eq!(s.config, Config::default());
         s.update(|c| {
-            c.rail = Some("stellar:testnet".into());
-            c.rail_mut("stellar:testnet").wallet = Some("CWALLET".into());
+            c.rail = Some("example:testnet".into());
+            c.rail_mut("example:testnet").wallet = Some("CWALLET".into());
             Ok(())
         })
         .unwrap();
         let again = Settings::load(dir.clone()).unwrap();
         assert_eq!(again.config, s.config);
         let text = std::fs::read_to_string(Settings::path(&dir)).unwrap();
-        assert!(text.contains("[rails.\"stellar:testnet\"]"), "{text}");
+        assert!(text.contains("[rails.\"example:testnet\"]"), "{text}");
         std::fs::write(Settings::path(&dir), "rail = 3").unwrap();
         assert_eq!(Settings::load(dir.clone()).err().unwrap().code, 3);
         std::fs::remove_dir_all(dir).unwrap();

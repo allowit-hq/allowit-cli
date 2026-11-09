@@ -16,8 +16,7 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
         .ok_or_else(|| Error::config("Select an independent RPC endpoint to verify this import"))?;
     let authority = cx.server_authority(rail)?;
     let bytes = read_input(&a.profile_file)?;
-    let p =
-        allowit_sdk_engine::profiles::Cache::open(&cx.dir()?)?.import(&authority, &rpc, &bytes)?;
+    let p = allowit_sdk::profiles::Cache::open(&cx.dir()?)?.import(&authority, &rpc, &bytes)?;
     cx.out.value(&p.inspect()?);
     Ok(0)
 }

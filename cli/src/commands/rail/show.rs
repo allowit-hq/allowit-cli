@@ -1,5 +1,5 @@
 //! `allowit rail show [RAIL]`.
-use crate::{ctx::Ctx, error::Result, routing, vendors};
+use crate::{ctx::Ctx, error::Result, rails, routing};
 
 pub(crate) const EXAMPLES: &str = "\
 Examples:
@@ -19,10 +19,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         Some(r) => routing::info(r)?,
         None => cx.rail()?,
     };
-    let vendor = vendors::rail(info);
-    let caps = vendor.caps();
+    let adapter = rails::rail(info);
+    let caps = adapter.caps();
     let settings = cx.settings()?.rail(info.id);
-    let tokens: Vec<_> = vendor
+    let tokens: Vec<_> = adapter
         .tokens()
         .iter()
         .map(|t| {
@@ -31,7 +31,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             })
         })
         .collect();
-    let unavailable: Vec<&str> = vendors::VERBS
+    let unavailable: Vec<&str> = rails::VERBS
         .iter()
         .copied()
         .filter(|v| !caps.verbs.contains(v))
@@ -60,7 +60,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             v.join(", ")
         }
     };
-    let codes: Vec<&str> = vendor.tokens().iter().map(|t| t.code).collect();
+    let codes: Vec<&str> = adapter.tokens().iter().map(|t| t.code).collect();
     // The same keys as the JSON form, in its order; lists print joined.
     let rows = vec![
         vec!["rail".to_owned(), info.id.into()],

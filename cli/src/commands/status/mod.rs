@@ -2,10 +2,10 @@
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
+    rails,
     request::request_id_valid,
     routing,
     settings::journal,
-    vendors,
 };
 use std::time::Duration;
 
@@ -60,7 +60,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 && !e
                     .wallet
                     .as_ref()
-                    .is_some_and(|w| vendors::address::same_wallet(rail.family, flag, w))
+                    .is_some_and(|w| rails::address::same_wallet(rail.family, flag, w))
             {
                 return Err(Error::usage(match &e.wallet {
                     Some(recorded) => format!("request {} belongs to wallet {recorded}", args.id),
@@ -74,9 +74,9 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         // A selection is checked as `--wallet` is.
         None => cx.wallet(rail)?,
     };
-    let vendor = vendors::rail(rail);
+    let adapter = rails::rail(rail);
     let code = routing::with_network(Some(rail.id.into()), || {
-        let binding = vendor.status_binding(cx, wallet.as_deref(), &args.id)?;
+        let binding = adapter.status_binding(cx, wallet.as_deref(), &args.id)?;
         // A request reads only under the policy that sent it.
         if let Some(recorded) = entry.as_ref().and_then(|e| e.policy.as_deref())
             && binding.policy.as_deref() != Some(recorded)
@@ -87,7 +87,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 binding.policy.as_deref().unwrap_or("none")
             )));
         }
-        vendor.status(
+        adapter.status(
             cx,
             &args.id,
             binding,

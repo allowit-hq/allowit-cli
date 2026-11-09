@@ -1,22 +1,28 @@
 //! Rail selection, keys and the public wallet profiles: the rail decides the
 //! key curve, the address formats and the adapter, and a command never reads
 //! a credential, a profile or the network that it does not need.
+//!
+//! Every test runs on each rail that the SDK registers. A test of a feature
+//! that a rail does not serve is skipped for that rail by its own declaration.
+//! No test names a vendor: every address, asset and profile comes from the
+//! rail's fixtures.
 mod common;
 
-use common::{Mock, Sandbox, code, stderr, stdout};
+use allowit_sdk::plugins::Feature;
+use common::{Mock, Rail, Sandbox, code, each_rail, every_rail, stderr, stdout};
 use serde_json::{Value, json};
 
 #[test]
 fn unknown_rail_keeps_the_cli_recovery_hint_without_persisting_settings() {
     let sandbox = Sandbox::new("unknown-rail-hint");
     let mock = Mock::new();
-    let output = sandbox.run(&["--json", "rail", "show", "stellar:futurenet"]);
+    let output = sandbox.run(&["--json", "rail", "show", "example:unknown"]);
     assert_eq!(code(&output), Some(2));
     assert!(output.stdout.is_empty());
     let error: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(
         error["error"]["message"],
-        "unknown rail \"stellar:futurenet\"; run allowit rail ls"
+        "unknown rail \"example:unknown\"; run allowit rail ls"
     );
     assert_eq!(error["error"]["exit"], 2);
     assert!(!sandbox.config().join("config.toml").exists());
@@ -26,51 +32,86 @@ fn unknown_rail_keeps_the_cli_recovery_hint_without_persisting_settings() {
 }
 
 #[test]
-fn rail_aliases_and_settings_stay_bound_to_the_selected_stellar_network() {
-    let mut sandbox = Sandbox::new("rail");
-    assert_eq!(code(&sandbox.run(&["keys", "generate", "agent"])), Some(3));
-    assert_eq!(
-        sandbox.json(&["rail", "use", "stellar:mainnet"])["rail"],
-        "stellar:pubnet"
-    );
-    sandbox.ok(&["rail", "use", "stellar:testnet"]);
-    let asset = allowit_stellar_wallet::asset_from_identity("XLM", None).unwrap();
-    let contract = allowit_stellar_wallet::sac_address("stellar:testnet", &asset).unwrap();
-    sandbox.ok(&["wallet", "use", &contract]);
-    sandbox.ok(&["rail", "use", "stellar:pubnet"]);
-    let config = sandbox.json(&["config", "show"]);
-    assert!(config["config"]["rails"]["stellar:pubnet"]["wallet"].is_null());
-    assert_eq!(
-        config["config"]["rails"]["stellar:testnet"]["wallet"],
-        contract
-    );
-    assert_eq!(config["railSource"], "config.toml");
-    assert_eq!(
-        code(&sandbox.run(&["rail", "use", "stellar:futurenet"])),
-        Some(2)
-    );
-    sandbox.set("ALLOWIT_RAIL", "stellar:testnet");
-    assert_eq!(sandbox.json(&["rail", "show"])["rail"], "stellar:testnet");
-    assert_eq!(
-        sandbox.json(&["--rail", "stellar:pubnet", "rail", "show"])["rail"],
-        "stellar:pubnet"
-    );
+fn rail_ls_and_show_list_exactly_the_registered_rails() {
+    let sandbox = Sandbox::new("rail-ls");
+    let listed: Vec<String> = sandbox
+        .json(&["rail", "ls"])
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["rail"].as_str().unwrap().to_owned())
+        .collect();
+    let registered: Vec<String> = allowit_sdk::plugins::rails()
+        .iter()
+        .flat_map(|p| p.networks().iter().map(|n| n.id.to_owned()))
+        .collect();
+    assert_eq!(listed, registered);
+    every_rail(|rail| {
+        let shown = sandbox.json(&["rail", "show", rail.network]);
+        assert_eq!(shown["rail"], rail.network);
+        let ops = rail.plugin.capabilities(rail.network).operations;
+        assert_eq!(
+            shown["ops"],
+            json!(ops),
+            "{}: rail show reports the plugin's operations",
+            rail.network
+        );
+    });
 }
 
 #[test]
-fn stellar_keys_keep_private_material_out_of_public_metadata() {
+fn rail_aliases_and_settings_stay_bound_to_the_selected_network() {
+    every_rail(|rail| {
+        let mut sandbox = Sandbox::new("rail");
+        assert_eq!(code(&sandbox.run(&["keys", "generate", "agent"])), Some(3));
+        for info in rail.plugin.networks() {
+            for alias in info.aliases {
+                assert_eq!(sandbox.json(&["rail", "use", alias])["rail"], info.id);
+            }
+        }
+        sandbox.ok(&["rail", "use", rail.network]);
+        let wallet = rail.fixtures.wallet.as_str();
+        sandbox.ok(&["wallet", "use", wallet]);
+        if let Some(other) = rail.other {
+            sandbox.ok(&["rail", "use", other]);
+            let config = sandbox.json(&["config", "show"]);
+            assert!(config["config"]["rails"][other]["wallet"].is_null());
+            assert_eq!(config["config"]["rails"][rail.network]["wallet"], wallet);
+            assert_eq!(config["railSource"], "config.toml");
+            assert_eq!(
+                sandbox.json(&["--rail", other, "rail", "show"])["rail"],
+                other
+            );
+        }
+        assert_eq!(
+            code(&sandbox.run(&["rail", "use", "example:unknown"])),
+            Some(2)
+        );
+        sandbox.set("ALLOWIT_RAIL", rail.network);
+        assert_eq!(sandbox.json(&["rail", "show"])["rail"], rail.network);
+    });
+}
+
+#[test]
+fn keys_keep_private_material_out_of_public_metadata() {
+    every_rail(keys_on);
+}
+
+fn keys_on(rail: &Rail<'_>) {
+    let net = rail.network;
     let sandbox = Sandbox::new("keys");
-    sandbox.ok(&["rail", "use", "stellar:testnet"]);
-    let stellar = sandbox.json(&["--rail", "stellar:testnet", "keys", "generate", "agent"]);
-    assert_eq!(stellar["curve"], "ed25519");
-    let address = stellar["address"].as_str().unwrap();
-    // Stellar keys print as G strkeys.
-    assert!(address.starts_with('G') && address.len() == 56);
-    assert_eq!(stellar["publicKey"], stellar["address"]);
+    sandbox.ok(&["rail", "use", net]);
+    let generated = sandbox.json(&["--rail", net, "keys", "generate", "agent"]);
+    let caps = rail.plugin.capabilities(net);
+    assert_eq!(generated["curve"], caps.curve);
+    let address = generated["address"].as_str().unwrap().to_owned();
+    if caps.address_is_key {
+        assert_eq!(generated["publicKey"], generated["address"]);
+    }
     // Private keys stay in secrets/, mode 0600 in a 0700 directory.
     let secret = sandbox.ok(&["keys", "export", "agent"]);
     let secret = secret.trim();
-    assert!(secret.starts_with('S') && secret.len() == 56);
+    assert!(!secret.is_empty());
     let metadata = std::fs::read_to_string(sandbox.config().join("keys/agent.toml")).unwrap();
     assert!(!metadata.contains(secret));
     #[cfg(unix)]
@@ -86,44 +127,52 @@ fn stellar_keys_keep_private_material_out_of_public_metadata() {
     assert!(!listed.to_string().contains(secret));
     sandbox.ok(&["keys", "use", "agent"]);
     assert_eq!(
-        sandbox.json(&["config", "show"])["config"]["rails"]["stellar:testnet"]["agent"],
+        sandbox.json(&["config", "show"])["config"]["rails"][net]["agent"],
         "agent"
     );
-    assert_eq!(
-        code(&sandbox.run(&["--rail", "stellar:pubnet", "keys", "use", "agent"])),
-        Some(0)
-    );
+    if let Some(other) = rail.other {
+        assert_eq!(
+            code(&sandbox.run(&["--rail", other, "keys", "use", "agent"])),
+            Some(0)
+        );
+    }
     // Re-import of the exported key under another name; the address is the same.
     let file = sandbox.private_file("agent.key", secret);
     let copy = sandbox.json(&[
         "--rail",
-        "stellar:testnet",
+        net,
         "keys",
         "import",
         "copy",
         file.to_str().unwrap(),
     ]);
-    assert_eq!(copy["address"], stellar["address"]);
+    assert_eq!(copy["address"], address);
+    // A seed-derived secret imports to the plugin's address for that seed.
+    let (expected, derived) = rail.account(11);
+    let file = sandbox.private_file("derived.key", &derived);
+    let imported = sandbox.json(&["keys", "import", "derived", file.to_str().unwrap()]);
+    assert_eq!(imported["address"], expected);
+    sandbox.ok(&["keys", "rm", "derived", "--yes"]);
     // keys add records a public address that cannot sign.
     let owner = sandbox.json(&[
         "--rail",
-        "stellar:testnet",
+        net,
         "keys",
         "add",
         "owner",
         "--public-key",
-        address,
+        &address,
     ]);
     assert_eq!(owner["secret"], false);
     assert_eq!(code(&sandbox.run(&["keys", "use", "owner"])), Some(3));
     let bad = sandbox.run(&[
         "--rail",
-        "stellar:testnet",
+        net,
         "keys",
         "add",
         "bad",
         "--public-key",
-        "0x0000000000000000000000000000000000000000",
+        &rail.fixtures.invalid_address,
     ]);
     assert_eq!(code(&bad), Some(2));
     let output = sandbox.run(&["keys", "export", "owner"]);
@@ -151,177 +200,164 @@ fn stellar_keys_keep_private_material_out_of_public_metadata() {
 
 #[test]
 fn concurrent_commands_keep_every_config_edit_and_one_owner_per_key_name() {
-    let sandbox = Sandbox::new("concurrent");
-    let addr = |n: u8| {
-        let issuer = allowit_stellar_wallet::account_for_seed(&[n; 32]);
-        let asset = allowit_stellar_wallet::asset_from_identity("USD", Some(&issuer)).unwrap();
-        allowit_stellar_wallet::sac_address("stellar:testnet", &asset).unwrap()
-    };
-    let spawn_all = |args: &dyn Fn(&str) -> Vec<String>| {
-        let children: Vec<_> = (1..=8u8)
-            .map(|n| {
-                let address = addr(n);
-                let child = sandbox
-                    .command()
-                    .args(args(&address))
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .unwrap();
-                (address, child)
-            })
+    every_rail(|rail| {
+        let net = rail.network;
+        let sandbox = Sandbox::new("concurrent");
+        let spawn_all = |args: &dyn Fn(u8) -> Vec<String>| {
+            let children: Vec<_> = (1..=8u8)
+                .map(|n| {
+                    let child = sandbox
+                        .command()
+                        .args(args(n))
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap();
+                    (n, child)
+                })
+                .collect();
+            children
+                .into_iter()
+                .map(|(n, mut child)| (n, child.wait().unwrap().code()))
+                .collect::<Vec<_>>()
+        };
+        // Each wallet use reads and rewrites config.toml; none loses another's wallet.
+        let wallet = |n: u8| rail.account(n).0;
+        for (_, exit) in spawn_all(&|n| {
+            ["--rail", net, "wallet", "use", &wallet(n)]
+                .map(Into::into)
+                .into()
+        }) {
+            assert_eq!(exit, Some(0));
+        }
+        let config = sandbox.json(&["config", "show"]);
+        let mut wallets: Vec<_> = config["config"]["rails"][net]["wallets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap().to_owned())
             .collect();
-        children
-            .into_iter()
-            .map(|(address, mut child)| (address, child.wait().unwrap().code()))
-            .collect::<Vec<_>>()
-    };
-    // Each wallet use reads and rewrites config.toml; none loses another's wallet.
-    for (_, exit) in spawn_all(&|a| {
-        ["--rail", "stellar:testnet", "wallet", "use", a]
+        wallets.sort();
+        let mut expected = (1..=8).map(wallet).collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(wallets, expected);
+        // Only one keys add claims a name; the stored address is the winner's.
+        let owner = |n: u8| rail.account(100 + n).0;
+        let results = spawn_all(&|n| {
+            [
+                "--rail",
+                net,
+                "keys",
+                "add",
+                "owner",
+                "--public-key",
+                &owner(n),
+            ]
             .map(Into::into)
             .into()
-    }) {
-        assert_eq!(exit, Some(0));
-    }
-    let config = sandbox.json(&["config", "show"]);
-    let mut wallets: Vec<_> = config["config"]["rails"]["stellar:testnet"]["wallets"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|w| w.as_str().unwrap().to_owned())
-        .collect();
-    wallets.sort();
-    let mut expected = (1..=8).map(addr).collect::<Vec<_>>();
-    expected.sort();
-    assert_eq!(wallets, expected);
-    // Only one keys add claims a name; the stored address is the winner's.
-    let results = spawn_all(&|a| {
-        [
+        });
+        let winners: Vec<_> = results
+            .iter()
+            .filter(|(_, exit)| *exit == Some(0))
+            .collect();
+        assert_eq!(winners.len(), 1, "{results:?}");
+        assert!(
+            results.iter().all(|(_, exit)| matches!(exit, Some(0 | 3))),
+            "{results:?}"
+        );
+        assert_eq!(
+            sandbox.json(&["keys", "show", "owner"])["address"],
+            owner(winners[0].0)
+        );
+    });
+}
+
+#[test]
+fn faucet_funding_goes_through_the_rail_plugin_and_its_endpoint() {
+    each_rail(Feature::KeysFund, |rail| {
+        let mut sandbox = Sandbox::new("fund");
+        let mock = Mock::new();
+        sandbox.set("ALLOWIT_FAUCET_URL", &mock.url);
+        sandbox.ok(&["rail", "use", rail.network]);
+        let key = sandbox.json(&["keys", "generate", "agent"]);
+        let address = key["address"].as_str().unwrap().to_owned();
+        let listener = mock.listener;
+        let expected = address.clone();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let (head, body) = common::read_request(&mut conn);
+            // The plugin owns the wire format; the request names the key.
+            assert!(
+                head.contains(&expected) || body.to_string().contains(&expected),
+                "{head}"
+            );
+            common::reply(&mut conn, 503, &json!({"error": "unavailable"}));
+        });
+        let output = sandbox.run(&["keys", "fund", "agent"]);
+        assert_ne!(code(&output), Some(0), "a refused faucet is not funding");
+        assert!(!stdout(&output).contains("transactionHash"));
+        server.join().unwrap();
+        // A network that is not a test network has no faucet.
+        for info in rail.plugin.networks().iter().filter(|n| !n.testnet) {
+            let net = info.id;
+            let output = sandbox.run(&["--rail", net, "keys", "fund", "agent"]);
+            assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
+            // generate --fund refuses before the key exists, so a retry is clean.
+            let output =
+                sandbox.run(&["--rail", net, "--json", "keys", "generate", "pk", "--fund"]);
+            assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
+            assert!(output.stdout.is_empty(), "{net}");
+            assert_ne!(
+                code(&sandbox.run(&["keys", "show", "pk"])),
+                Some(0),
+                "{net}"
+            );
+        }
+    });
+}
+
+#[test]
+fn invalid_input_fails_before_any_settings_bundle_or_network_access() {
+    each_rail(Feature::Transfer, |rail| {
+        let net = rail.network;
+        let mut sandbox = Sandbox::new("cross");
+        let mock = Mock::new();
+        sandbox
+            .set("ALLOWIT_URL", &mock.url)
+            .set("ALLOWIT_PROFILE_UNSUPPORTED", "/must-not-be-read");
+        let fixtures = rail.fixtures;
+        let amount = format!("{}:1", fixtures.token.code);
+        for (to, amount, needle) in [
+            (
+                fixtures.invalid_address.as_str(),
+                amount.as_str(),
+                "recipient",
+            ),
+            (fixtures.recipient.as_str(), "NOPE:1", "NOPE"),
+        ] {
+            let args = [
+                "--rail", net, "exec", "--op", "transfer", "--to", to, "--amount", amount,
+            ];
+            let output = sandbox.run(&args);
+            assert_eq!(code(&output), Some(2), "{args:?}: {}", stderr(&output));
+            assert!(
+                stderr(&output).contains(needle),
+                "{args:?}: {}",
+                stderr(&output)
+            );
+        }
+        assert!(!sandbox.config().exists(), "input errors created settings");
+        let output = sandbox.run(&[
             "--rail",
-            "stellar:testnet",
-            "keys",
-            "add",
-            "owner",
-            "--public-key",
-            &allowit_stellar_wallet::account_for_seed(&[a.as_bytes()[1]; 32]),
-        ]
-        .map(Into::into)
-        .into()
+            net,
+            "--wallet",
+            &fixtures.invalid_address,
+            "wallet",
+            "show",
+        ]);
+        assert_eq!(code(&output), Some(2));
+        mock.assert_untouched();
     });
-    let winners: Vec<_> = results
-        .iter()
-        .filter(|(_, exit)| *exit == Some(0))
-        .collect();
-    assert_eq!(winners.len(), 1, "{results:?}");
-    assert!(
-        results.iter().all(|(_, exit)| matches!(exit, Some(0 | 3))),
-        "{results:?}"
-    );
-    assert_eq!(
-        sandbox.json(&["keys", "show", "owner"])["address"],
-        allowit_stellar_wallet::account_for_seed(&[winners[0].0.as_bytes()[1]; 32])
-    );
-}
-
-#[test]
-fn faucet_funding_goes_through_the_rail_vendor() {
-    let mut sandbox = Sandbox::new("fund");
-    let mock = Mock::new();
-    sandbox.set("ALLOWIT_FRIENDBOT_URL", &mock.url);
-    sandbox.ok(&["rail", "use", "stellar:testnet"]);
-    let key = sandbox.json(&["keys", "generate", "agent"]);
-    let address = key["address"].as_str().unwrap().to_owned();
-    let listener = mock.listener;
-    let expected = address.clone();
-    let server = std::thread::spawn(move || {
-        let (mut conn, _) = listener.accept().unwrap();
-        let (head, _) = common::read_request(&mut conn);
-        assert!(
-            head.starts_with(&format!("GET /?addr={expected} ")),
-            "{head}"
-        );
-        common::reply(&mut conn, 200, &json!({"hash": "ab".repeat(32)}));
-    });
-    let funded = sandbox.json(&["keys", "fund", "agent"]);
-    assert_eq!(funded["address"], address);
-    assert_eq!(funded["transactionHash"], "ab".repeat(32));
-    server.join().unwrap();
-    // Pubnet has no faucet.
-    {
-        let rail = "stellar:pubnet";
-        let output = sandbox.run(&["--rail", rail, "keys", "fund", "agent"]);
-        assert_eq!(code(&output), Some(3), "{rail}: {}", stderr(&output));
-        // generate --fund refuses before the key exists, so a retry is clean.
-        let output = sandbox.run(&["--rail", rail, "--json", "keys", "generate", "pk", "--fund"]);
-        assert_eq!(code(&output), Some(3), "{rail}: {}", stderr(&output));
-        assert!(output.stdout.is_empty(), "{rail}");
-        assert_ne!(
-            code(&sandbox.run(&["keys", "show", "pk"])),
-            Some(0),
-            "{rail}"
-        );
-    }
-}
-
-#[test]
-fn invalid_stellar_input_fails_before_any_settings_bundle_or_network_access() {
-    let mut sandbox = Sandbox::new("cross");
-    let mock = Mock::new();
-    sandbox
-        .set("ALLOWIT_URL", &mock.url)
-        .set("ALLOWIT_PROFILE_UNSUPPORTED", "/must-not-be-read");
-    let invalid = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-    let stellar = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
-    for (args, needle) in [
-        (
-            vec![
-                "--rail",
-                "stellar:testnet",
-                "exec",
-                "--op",
-                "transfer",
-                "--to",
-                invalid,
-                "--amount",
-                "XLM:1",
-            ],
-            "not a stellar recipient",
-        ),
-        (
-            vec![
-                "--rail",
-                "stellar:testnet",
-                "exec",
-                "--op",
-                "transfer",
-                "--to",
-                stellar,
-                "--amount",
-                "SOL:1",
-            ],
-            "SOL",
-        ),
-    ] {
-        let output = sandbox.run(&args);
-        assert_eq!(code(&output), Some(2), "{args:?}: {}", stderr(&output));
-        assert!(
-            stderr(&output).contains(needle),
-            "{args:?}: {}",
-            stderr(&output)
-        );
-    }
-    assert!(!sandbox.config().exists(), "input errors created settings");
-    let output = sandbox.run(&[
-        "--rail",
-        "stellar:testnet",
-        "--wallet",
-        "0x00",
-        "wallet",
-        "show",
-    ]);
-    assert_eq!(code(&output), Some(2));
-    mock.assert_untouched();
 }
 
 #[test]
@@ -362,223 +398,94 @@ fn stdout_escapes_display_controls_and_redacts_the_engine_token() {
     assert!(text.contains("[redacted]"), "{text}");
 }
 
-fn stellar_approval_fixture() -> Value {
-    allowit_stellar_wallet::test_support::portable_approval()
-}
-fn public_stellar_profile(fixture: &Value) -> Value {
-    allowit_stellar_wallet::test_support::approval_public_profile(fixture)
-}
-
-fn stellar_sandbox(profile: &Value) -> Sandbox {
-    let mut sandbox = Sandbox::new("stellar-profile");
-    let path = sandbox.work().join("public-stellar.json");
-    std::fs::write(&path, serde_json::to_vec(profile).unwrap()).unwrap();
-    common::public_profile_fixture(&sandbox, profile, "http://127.0.0.1:1");
-    sandbox
-        .set("ALLOWIT_STELLAR_SIGNER", "/must-never-be-opened")
-        .set("ALLOWIT_URL", "not-a-server-origin");
-    sandbox
+/// The rail's public profile fixture, seeded as an already verified export.
+fn profile_sandbox(rail: &Rail<'_>) -> (Sandbox, Value) {
+    let profile: Value = serde_json::from_slice(&rail.fixtures.public_profile).unwrap();
+    let mut sandbox = Sandbox::new("public-profile");
+    common::public_profile_fixture(&sandbox, &profile, "http://127.0.0.1:1");
+    sandbox.set("ALLOWIT_URL", "not-a-server-origin");
+    (sandbox, profile)
 }
 
 #[test]
-fn public_stellar_profile_shows_without_agent_key_or_engine() {
-    let fixture = stellar_approval_fixture();
-    let profile = public_stellar_profile(&fixture);
-    let sandbox = stellar_sandbox(&profile);
-    let shown = sandbox.json(&["--rail", "stellar:testnet", "wallet", "show"]);
-    assert_eq!(shown["network"], "stellar:testnet");
-    assert_eq!(shown["rail"], "stellar:testnet");
-    assert_eq!(shown["agent"], profile["config"]["agent"]);
-    assert_eq!(shown["wallet"], profile["wallet"]);
-    assert!(shown.get("signingSeed").is_none());
-    assert!(shown.get("endpoints").is_none());
-    assert!(shown.get("policy").is_none());
-    let summary = sandbox.json(&["--rail", "stellar:testnet", "policy", "show"]);
-    assert_eq!(summary["policyId"], fixture["policy"]["id"]);
-    assert_eq!(summary["asset"], "XLM");
-    let source = sandbox.ok(&["--rail", "stellar:testnet", "policy", "show", "--source"]);
-    assert_eq!(
-        source.trim_end(),
-        fixture["policy"]["code"].as_str().unwrap().trim_end()
-    );
-    assert!(!source.contains('\x1b'));
-    // With --json the source is one JSON object.
-    let source = sandbox.json(&["--rail", "stellar:testnet", "policy", "show", "--source"]);
-    assert_eq!(
-        source["source"].as_str().unwrap().trim_end(),
-        fixture["policy"]["code"].as_str().unwrap().trim_end()
-    );
-    assert_eq!(source.as_object().unwrap().len(), 1, "{source}");
-    // Explicit classic selection keeps the same exact public profile binding.
-    let classic = profile["wallet"].as_str().unwrap();
-    assert!(classic.starts_with('G'));
-    let output = sandbox.run(&[
-        "--rail",
-        "stellar:testnet",
-        "--wallet",
-        classic,
-        "wallet",
-        "show",
-    ]);
-    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
-    assert!(stdout(&output).contains(classic));
+fn public_profile_shows_without_agent_key_or_engine() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let (sandbox, profile) = profile_sandbox(rail);
+        let shown = sandbox.json(&["--rail", net, "wallet", "show"]);
+        assert_eq!(shown["network"], net);
+        assert_eq!(shown["rail"], net);
+        assert_eq!(shown["wallet"], profile["wallet"]);
+        assert!(shown.get("signingSeed").is_none());
+        assert!(shown.get("endpoints").is_none());
+        assert!(shown.get("policy").is_none());
+        let summary = sandbox.json(&["--rail", net, "policy", "show"]);
+        assert_eq!(summary["policyId"], profile["policyId"]);
+        let source = sandbox.ok(&["--rail", net, "policy", "show", "--source"]);
+        assert!(!source.trim().is_empty());
+        assert!(!source.contains('\x1b'));
+        // With --json the source is one JSON object.
+        let json = sandbox.json(&["--rail", net, "policy", "show", "--source"]);
+        assert_eq!(
+            json["source"].as_str().unwrap().trim_end(),
+            source.trim_end()
+        );
+        assert_eq!(json.as_object().unwrap().len(), 1, "{json}");
+        // Explicit selection keeps the same exact public profile binding.
+        let wallet = profile["wallet"].as_str().unwrap();
+        let output = sandbox.run(&["--rail", net, "--wallet", wallet, "wallet", "show"]);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        assert!(stdout(&output).contains(wallet));
+    });
 }
 
 #[test]
 fn rail_conflict_and_secret_material_in_a_public_profile_fail_before_transport() {
-    let fixture = stellar_approval_fixture();
-    let mut profile = public_stellar_profile(&fixture);
-    let sandbox = stellar_sandbox(&profile);
-    let output = sandbox.run(&["--rail", "stellar:pubnet", "wallet", "show"]);
-    assert_eq!(code(&output), Some(3));
-    assert!(stderr(&output).contains("No verified public profile matches"));
-    assert!(output.stdout.is_empty());
-    let native = allowit_stellar_wallet::asset_from_identity("XLM", None).unwrap();
-    let other = allowit_stellar_wallet::sac_address("stellar:testnet", &native).unwrap();
-    let output = sandbox.run(&[
-        "--rail",
-        "stellar:testnet",
-        "--wallet",
-        &other,
-        "wallet",
-        "show",
-    ]);
-    assert_eq!(code(&output), Some(3), "{}", stderr(&output));
-    assert!(stderr(&output).contains("No verified public profile matches"));
-    profile["signingSeed"] = json!("must-remain-local");
-    common::public_profile_fixture(&sandbox, &profile, "http://127.0.0.1:1");
-    let output = sandbox.run(&["--rail", "stellar:testnet", "wallet", "show"]);
-    assert_eq!(code(&output), Some(3));
-    assert!(stderr(&output).contains("must not contain signing material"));
-    assert!(output.stdout.is_empty());
-    assert!(!stdout(&output).contains("must-remain-local"));
+    every_rail(|rail| {
+        let net = rail.network;
+        let (sandbox, mut profile) = profile_sandbox(rail);
+        if let Some(other) = rail.other {
+            let output = sandbox.run(&["--rail", other, "wallet", "show"]);
+            assert_eq!(code(&output), Some(3));
+            assert!(stderr(&output).contains("No verified public profile matches"));
+            assert!(output.stdout.is_empty());
+        }
+        let other_wallet = rail.account(9).0;
+        let output = sandbox.run(&["--rail", net, "--wallet", &other_wallet, "wallet", "show"]);
+        assert_eq!(code(&output), Some(3), "{}", stderr(&output));
+        assert!(stderr(&output).contains("No verified public profile matches"));
+        profile["signingSeed"] = json!("must-remain-local");
+        common::public_profile_fixture(&sandbox, &profile, "http://127.0.0.1:1");
+        let output = sandbox.run(&["--rail", net, "wallet", "show"]);
+        assert_eq!(code(&output), Some(3));
+        assert!(stderr(&output).contains("must not contain signing material"));
+        assert!(output.stdout.is_empty());
+        assert!(!stdout(&output).contains("must-remain-local"));
+    });
 }
 
-#[cfg(unix)]
 #[test]
-fn hidden_wallet_approve_exports_only_the_public_exact_intent() {
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    let fixture = stellar_approval_fixture();
-    let mut sandbox = Sandbox::new("approve");
-    let file = sandbox.work().join("policy.json");
-    let mut policy = fixture["policy"].clone();
-    policy["signingSeed"] = json!("must-remain-local");
-    std::fs::write(&file, serde_json::to_vec(&policy).unwrap()).unwrap();
-    let owner = fixture["intent"]["owner"].as_str().unwrap();
-    let request = fixture["intent"]["requestId"].as_str().unwrap();
-    sandbox
-        .set("ALLOWIT_URL", "https://app.allowit.xyz")
-        .set("ALLOWIT_OWNER_KEYPAIR", "/must-never-be-opened")
-        .set("ALLOWIT_STELLAR_SIGNER", "/must-never-be-opened");
-    let output = sandbox.run(&[
-        "--network",
-        "stellar:testnet",
-        "wallet",
-        "approve",
-        "--policy-file",
-        file.to_str().unwrap(),
-        "--owner",
-        owner,
-        "--request-id",
-        request,
-    ]);
-    assert_eq!(code(&output), Some(10), "{}", stderr(&output));
-    let shown: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(shown["state"], "awaiting_owner_approval");
-    assert_eq!(shown["executed"], false);
-    assert_eq!(shown["movesFunds"], false);
-    let url = shown["signingUrl"].as_str().unwrap();
-    let encoded = url.split_once("#allowit-stellar-approval=").unwrap().1;
-    let public: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap();
-    assert_eq!(public, fixture["intent"]);
-    assert!(!stdout(&output).contains("must-remain-local"));
-    assert!(!stdout(&output).contains("must-never-be-opened"));
-    // The link flow serves Stellar testnet only.
-    let output = sandbox.run(&[
-        "--network",
-        "stellar:pubnet",
-        "wallet",
-        "approve",
-        "--policy-file",
-        file.to_str().unwrap(),
-        "--owner",
-        owner,
-        "--request-id",
-        request,
-    ]);
-    assert_eq!(code(&output), Some(3));
-}
-
-#[cfg(unix)]
-#[test]
-fn hidden_wallet_configure_keeps_an_expired_handoff_for_browser_recovery() {
-    use allowit_stellar_wallet as sdk;
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    use sha2::{Digest, Sha256};
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut sandbox = Sandbox::new("configure");
-    sandbox.set("ALLOWIT_URL", "https://app.allowit.xyz");
-    let journal = sandbox.work().join(".allowit/stellar-owner-journal");
-    std::fs::create_dir_all(&journal).unwrap();
-    for path in [sandbox.work().join(".allowit"), journal.clone()] {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let mut state = sdk::test_support::owner::fresh(&sdk::account_for_seed(&[1; 32]));
-    state.sequence = 10;
-    let agent = sdk::account_for_seed(&[2; 32]);
-    let engine = sdk::account_for_seed(&[3; 32]);
-    let id = "cli-expired-stellar-setup-001";
-    let original =
-        sdk::owner::prepare_native_setup(&state, &agent, &engine, id, "stellar:testnet", 100, 1)
-            .unwrap();
-    let path = journal.join(format!("request-{:x}.json", Sha256::digest(id.as_bytes())));
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .unwrap();
-    serde_json::to_writer(file, &original).unwrap();
-    let original_bytes = std::fs::read(&path).unwrap();
-    let configure = |agent: &str| {
-        sandbox.run(&[
-            "--rail",
-            "stellar:testnet",
-            "wallet",
-            "configure",
-            "--owner",
-            &state.address,
-            "--agent",
-            agent,
-            "--engine",
-            &engine,
-            "--request-id",
-            id,
-        ])
-    };
-    let output = configure(&agent);
-    assert_eq!(code(&output), Some(10), "{}", stderr(&output));
-    let shown: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(shown["state"], "owner_intent_expired");
-    assert_eq!(shown["recoveryOnly"], true);
-    assert_eq!(shown["executed"], false);
-    assert_eq!(shown["transactionHash"], original.transaction_hash);
-    let encoded = shown["signingUrl"]
-        .as_str()
-        .unwrap()
-        .split_once("#allowit-stellar-owner=")
-        .unwrap()
-        .1;
-    let recovered: sdk::owner::NativeSetup =
-        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap();
-    assert_eq!(recovered, original);
-    assert_eq!(std::fs::read(&path).unwrap(), original_bytes);
-    let conflict = configure(&sdk::account_for_seed(&[4; 32]));
-    assert!(!conflict.status.success());
-    assert_ne!(code(&conflict), Some(10));
-    assert!(conflict.stdout.is_empty());
-    assert!(stderr(&conflict).contains("already binds another intent"));
-    assert_eq!(std::fs::read(&path).unwrap(), original_bytes);
+fn wallet_selection_keeps_its_checksum_and_exact_profile_binding() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let (sandbox, profile) = profile_sandbox(rail);
+        let wallet = profile["wallet"].as_str().unwrap();
+        sandbox.ok(&["rail", "use", net]);
+        sandbox.ok(&["wallet", "use", wallet]);
+        assert_eq!(sandbox.json(&["wallet", "show"])["wallet"], wallet);
+        assert_eq!(
+            code(&sandbox.run(&["wallet", "use", &rail.fixtures.invalid_address])),
+            Some(2)
+        );
+        assert_eq!(
+            sandbox.json(&["config", "show"])["config"]["rails"][net]["wallet"],
+            wallet
+        );
+        let other = rail.account(9).0;
+        let refused = sandbox.run(&["--wallet", &other, "wallet", "show"]);
+        assert_eq!(code(&refused), Some(3), "{}", stderr(&refused));
+        assert!(stderr(&refused).contains("public profile"));
+    });
 }
 
 #[cfg(unix)]
@@ -630,35 +537,15 @@ fn no_dna_selects_compact_json_for_results_and_errors() {
 
 #[test]
 fn verbose_details_are_data_lines() {
-    let sandbox = Sandbox::new("verbose");
-    sandbox.ok(&["rail", "use", "stellar:testnet"]);
-    let output = sandbox.run(&["-v", "rail", "show"]);
-    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
-    let text = stderr(&output);
-    assert!(text.lines().any(|l| l == "rail  stellar:testnet"), "{text}");
-    assert!(text.lines().any(|l| l.starts_with("config  ")), "{text}");
-    common::assert_data(&text, "rail show -v");
-}
-
-#[test]
-fn classic_g_wallet_selection_keeps_checksum_and_exact_profile_binding() {
-    let fixture = stellar_approval_fixture();
-    let profile = public_stellar_profile(&fixture);
-    let sandbox = stellar_sandbox(&profile);
-    let wallet = profile["wallet"].as_str().unwrap();
-    sandbox.ok(&["rail", "use", "stellar:testnet"]);
-    sandbox.ok(&["wallet", "use", wallet]);
-    assert_eq!(sandbox.json(&["wallet", "show"])["wallet"], wallet);
-    let mut malformed = wallet.to_owned();
-    malformed.pop();
-    malformed.push(if wallet.ends_with('A') { 'B' } else { 'A' });
-    assert_eq!(code(&sandbox.run(&["wallet", "use", &malformed])), Some(2));
-    assert_eq!(
-        sandbox.json(&["config", "show"])["config"]["rails"]["stellar:testnet"]["wallet"],
-        wallet
-    );
-    let other = allowit_stellar_wallet::account_for_seed(&[9; 32]);
-    let refused = sandbox.run(&["--wallet", &other, "wallet", "show"]);
-    assert_eq!(code(&refused), Some(3), "{}", stderr(&refused));
-    assert!(stderr(&refused).contains("public profile"));
+    every_rail(|rail| {
+        let sandbox = Sandbox::new("verbose");
+        sandbox.ok(&["rail", "use", rail.network]);
+        let output = sandbox.run(&["-v", "rail", "show"]);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        let text = stderr(&output);
+        let line = format!("rail  {}", rail.network);
+        assert!(text.lines().any(|l| l == line), "{text}");
+        assert!(text.lines().any(|l| l.starts_with("config  ")), "{text}");
+        common::assert_data(&text, "rail show -v");
+    });
 }

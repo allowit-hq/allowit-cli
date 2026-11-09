@@ -3,7 +3,7 @@ use crate::{
     ctx::Ctx,
     error::{Error, Result},
 };
-use allowit_sdk_engine::generation::{self, GenerateRequest, Target};
+use allowit_sdk::generation::{self, GenerateRequest, Target};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --profile PROFILE --new-wallet 'Pay only my approved recipient'";

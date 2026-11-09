@@ -3,7 +3,7 @@ use crate::{
     ctx::Ctx,
     error::{Error, Result},
 };
-use allowit_sdk_engine::{owner::Context, wallet::LocalSigner};
+use allowit_sdk::{owner::Context, wallet::LocalSigner};
 use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
@@ -14,7 +14,7 @@ pub(crate) struct LocalOwner {
     root: PathBuf,
     signer: LocalSigner,
     backend: String,
-    authority: allowit_sdk_engine::config::ServerAuthority,
+    authority: allowit_sdk::config::ServerAuthority,
 }
 pub(crate) fn clock() -> Result<u64> {
     SystemTime::now()
@@ -40,7 +40,7 @@ pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
     let rail = cx.rail()?;
     let key = cx.key(name)?;
     key.check_rail(rail.id)?;
-    let signer = allowit_sdk_engine::wallet::local_signer(rail.id, &cx.signer(&key)?)?;
+    let signer = allowit_sdk::wallet::local_signer(rail.id, &cx.signer(&key)?)?;
     if signer.address() != key.address {
         return Err(Error::config("Owner key differs from its public metadata"));
     }
@@ -61,5 +61,5 @@ pub(crate) fn status(cx: &mut Ctx, id: &str) -> Result<serde_json::Value> {
     let rpc = cx
         .rpc_url(rail)?
         .ok_or_else(|| Error::config("Select an independent RPC endpoint"))?;
-    allowit_sdk_engine::owner::status(&cx.dir()?, rail.id, &rpc, id)
+    allowit_sdk::owner::status(&cx.dir()?, rail.id, &rpc, id)
 }

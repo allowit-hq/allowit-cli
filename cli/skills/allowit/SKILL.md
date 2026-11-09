@@ -42,7 +42,7 @@ Classic custody requires canonical-only source. The native installation binds th
 Run `allowit guide` for the command sequence and the build/configuration references.
 Inspect `allowit rail ls --json` and `allowit rail show RAIL --json`; use registered identifiers and advertised capabilities.
 Generate or import the local key, then select it with `allowit keys use NAME`.
-Follow the selected adapter's [configuration reference](../../src/vendors/) for public wallet profiles and native input formats.
+Follow the selected rail's vendor plugin documentation for public wallet profiles and native input formats.
 Read [known issues](../../../known_issues.md) before using a profile workaround.
 `ALLOWIT_URL` selects the server origin. Public profiles contain no signing material.
 The selected key must match the profile before any request or signature.
@@ -54,5 +54,4 @@ A failed enclosing transaction does not prove that its retained authorization ca
 Apply the selected rail's authorization and verified-receipt semantics before resubmission.
 Read verified native receipts before treating a payment as settled.
 
-Owner signing remains with the owner. The hidden `wallet configure` and `wallet approve` continuations retain their exact public intent and print a browser signing link.
-Review that bound intent in the browser. An expired configure continuation remains available for recovery and cannot become a fresh authorization under the same ID.
+Owner signing remains with the owner. Use `wallet setup` and the `policy deploy`, `fund`, `activate` and `export` owner workflow; each step binds its exact public intent.

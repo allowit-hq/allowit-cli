@@ -1,6 +1,7 @@
 //! Shared helpers for the process tests: an isolated sandbox per test and a
 //! one-connection-at-a-time mock engine.
 #![allow(dead_code)]
+use allowit_sdk::plugins::{Feature, Fixtures, RailPlugin};
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -71,7 +72,7 @@ impl Sandbox {
             .env("ALL_PROXY", "http://127.0.0.1:1")
             .env("NO_PROXY", "127.0.0.1,localhost")
             .env("ALLOWIT_URL", "http://127.0.0.1:1")
-            .env("ALLOWIT_FRIENDBOT_URL", "http://127.0.0.1:1");
+            .env("ALLOWIT_FAUCET_URL", "http://127.0.0.1:1");
         for (name, value) in &self.env {
             c.env(name, value);
         }
@@ -129,11 +130,6 @@ pub fn stderr(output: &Output) -> String {
 }
 pub fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-/// A Stellar S strkey for a 32-byte seed.
-pub fn stellar_seed(seed: [u8; 32]) -> String {
-    allowit_stellar_wallet::test_support::secret_seed(seed)
 }
 
 /// A loopback listener that stands in for the engine or an RPC node.
@@ -239,15 +235,78 @@ pub fn assert_data(text: &str, what: &str) {
     }
 }
 
-/// Public descriptor metadata derived from a real portable configuration, never build proof.
-pub fn portable_descriptor(config: &mut allowit_stellar_wallet::WalletConfig) -> Value {
-    allowit_stellar_wallet::test_support::portable_descriptor(config)
-}
-
-/// Seed an already verified export fixture. Production installation uses owner::export.
+/// Seeds an already verified public profile. Production installation uses
+/// the owner workflow export.
 pub fn public_profile_fixture(sandbox: &Sandbox, profile: &Value, backend: &str) {
     let store =
-        allowit_sdk::client::store::Store::open(&sandbox.config().join("public-profiles/versions"))
-            .unwrap();
-    store.save("fixture",&serde_json::json!({"schema":1,"network":profile["network"],"backend":backend,"descriptor":profile})).unwrap();
+        allowit_sdk::Store::open(&sandbox.config().join("public-profiles/versions")).unwrap();
+    store
+        .save(
+            "fixture",
+            &serde_json::json!({"schema":1,"network":profile["network"],"backend":backend,"descriptor":profile}),
+        )
+        .unwrap();
+}
+
+/// One registered rail as the shared tests see it: its test network, a second
+/// network of the same rail when it has one, and its fixtures.
+pub struct Rail<'a> {
+    pub plugin: &'static dyn RailPlugin,
+    pub network: &'static str,
+    pub other: Option<&'static str>,
+    pub fixtures: &'a Fixtures,
+}
+
+impl Rail<'_> {
+    /// A deterministic account address and its encoded secret for a seed.
+    pub fn account(&self, seed: u8) -> (String, String) {
+        let keys = self.plugin.keys();
+        let signer = keys.derive(&vec![seed; keys.entropy_bytes()]).unwrap();
+        (
+            signer.address().to_owned(),
+            signer.encoded_secret().to_string(),
+        )
+    }
+}
+
+/// Runs `test` once for every registered rail that does not skip `feature`.
+/// Shared tests never name a vendor; they take every value from the rail.
+pub fn each_rail(feature: Feature, mut test: impl FnMut(&Rail<'_>)) {
+    allowit_sdk::plugins::testkit::each(feature, |plugin, fixtures| {
+        let network = plugin.test_support().network;
+        let other = plugin
+            .networks()
+            .iter()
+            .map(|n| n.id)
+            .find(|id| *id != network);
+        test(&Rail {
+            plugin,
+            network,
+            other,
+            fixtures,
+        });
+    });
+}
+
+/// Runs `test` once for every registered rail. Keys, settings and profile
+/// display are part of every rail.
+pub fn every_rail(mut test: impl FnMut(&Rail<'_>)) {
+    let rails = allowit_sdk::plugins::rails();
+    assert!(!rails.is_empty(), "no registered rail");
+    for plugin in rails {
+        let support = plugin.test_support();
+        let network = support.network;
+        let other = plugin
+            .networks()
+            .iter()
+            .map(|n| n.id)
+            .find(|id| *id != network);
+        let fixtures = (support.fixtures)();
+        test(&Rail {
+            plugin: *plugin,
+            network,
+            other,
+            fixtures: &fixtures,
+        });
+    }
 }

@@ -3,9 +3,9 @@
 use crate::{
     ctx::Ctx,
     error::{Error, Result, quoted},
+    rails::{ExecRequest, asset::exec_uses},
     request::request_id_valid,
     settings::journal,
-    vendors::{ExecRequest, asset::exec_uses},
 };
 use std::{path::Path, time::Duration};
 
@@ -20,7 +20,7 @@ Examples:
 /// The request flags shared by `exec`.
 #[derive(clap::Args, Debug)]
 pub(crate) struct RequestArgs {
-    /// transfer, swap, deposit, redeem, custom, custom.FN or custom:CONTRACT.FN
+    /// An operation that `rail show` lists for the selected rail
     #[arg(long, value_name = "OP")]
     pub op: String,
     /// The recipient address, or the vault of a deposit or redeem
@@ -29,7 +29,7 @@ pub(crate) struct RequestArgs {
     /// Amount in the selected rail's asset format, or INTEGER base units; INTEGER vault shares for redeem
     #[arg(long, value_name = "AMOUNT")]
     pub amount: String,
-    /// The minimum to receive: ASSET:MIN for swap and redeem, INTEGER vault shares for deposit
+    /// The minimum to receive: ASSET:MIN for redeem, INTEGER vault shares for deposit
     #[arg(long, value_name = "MIN")]
     pub token_out: Option<String>,
     /// Call arguments as a JSON object, for custom operations
@@ -85,23 +85,23 @@ pub(crate) fn check_op(op: &str) -> Result<()> {
 pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i32> {
     check_op(&a.op)?;
     let rail = cx.rail()?;
-    let vendor = cx.vendor()?;
+    let adapter = cx.adapter()?;
     // Refuse what the rail cannot serve before a request ID is spent.
-    if !vendor.caps().verbs.contains(&"exec") {
-        return Err(vendor.na("exec"));
+    if !adapter.caps().verbs.contains(&"exec") {
+        return Err(adapter.na("exec"));
     }
-    if build_only && !vendor.caps().exec_build_only {
-        return Err(vendor.na("exec --build-only"));
+    if build_only && !adapter.caps().exec_build_only {
+        return Err(adapter.na("exec --build-only"));
     }
-    crate::vendors::require_op(vendor.as_ref(), &a.op)?;
+    crate::rails::require_op(&adapter, &a.op)?;
     // Input checks come before any settings, journal or network access.
-    crate::vendors::address::check_recipient(rail.family, &a.to)?;
+    crate::rails::address::check_recipient(rail.family, &a.to)?;
     let (spend, minimum) = exec_uses(&a.op);
-    let amount = vendor.parse_amount(&a.amount, spend)?;
+    let amount = adapter.parse_amount(&a.amount, spend)?;
     let token_out = a
         .token_out
         .as_deref()
-        .map(|t| vendor.parse_amount(t, minimum))
+        .map(|t| adapter.parse_amount(t, minimum))
         .transpose()?;
     let call_args = match &a.args {
         Some(raw) => {
@@ -114,7 +114,7 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
         }
         None => None,
     };
-    vendor.check_exec(&a.op, &a.to, token_out.as_ref(), call_args.as_ref())?;
+    adapter.check_exec(&a.op, &a.to, token_out.as_ref(), call_args.as_ref())?;
     if a.request_id
         .as_deref()
         .is_some_and(|id| !request_id_valid(id))
@@ -132,7 +132,7 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
             id
         }
     };
-    let binding = vendor.exec_binding(cx, selected.as_deref(), &request_id)?;
+    let binding = adapter.exec_binding(cx, selected.as_deref(), &request_id)?;
     cx.out.request_id = Some(request_id.clone());
     let request = ExecRequest {
         op: a.op,
@@ -169,7 +169,7 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
             },
         )?;
     }
-    let result = vendor.exec(cx, &request, binding);
+    let result = adapter.exec(cx, &request, binding);
     if !build_only {
         let code = match &result {
             Ok(code) => *code,
@@ -203,7 +203,7 @@ mod tests {
         let entry = journal::Entry {
             request_id: "pay-0001".into(),
             command: "exec".into(),
-            rail: "stellar:testnet".into(),
+            rail: "example:testnet".into(),
             wallet: None,
             policy: None,
             op: "transfer".into(),

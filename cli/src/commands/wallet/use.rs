@@ -1,5 +1,5 @@
 //! `allowit wallet use ADDR`.
-use crate::{ctx::Ctx, error::Result, vendors::address};
+use crate::{ctx::Ctx, error::Result, rails::address};
 
 pub(crate) const EXAMPLES: &str = "\
 Examples:
@@ -20,8 +20,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     address::check_wallet(rail.family, &args.address)?;
     if let Some(version) = &args.profile {
         let agent = cx.agent(rail)?;
-        allowit_sdk_engine::profiles::Cache::open(&cx.dir()?)?.select(
-            &allowit_sdk_engine::profiles::Selector {
+        allowit_sdk::profiles::Cache::open(&cx.dir()?)?.select(
+            &allowit_sdk::profiles::Selector {
                 network: rail.id.into(),
                 wallet: Some(args.address.clone()),
                 agent: Some(agent.address),

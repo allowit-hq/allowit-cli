@@ -33,7 +33,7 @@ fn data_lines_refuse_prose() {
         "name     agent\naddress  GABC\nsource\n  fn a() {}\n",
         "data",
     );
-    common::assert_data("NAME   RAIL\nagent  stellar:testnet\n", "table");
+    common::assert_data("NAME   RAIL\nagent  example:testnet\n", "table");
     common::assert_data("* CWALLET\n  COTHER\n", "list");
 }
 
@@ -135,6 +135,21 @@ fn offline_help_examples_run_and_print_only_data() {
     }
 }
 
+/// Replaces every registered rail identifier with `<rail>`, so a snapshot
+/// holds no vendor name and stays the same whichever rails the SDK registers.
+fn with_rail_placeholder(mut text: String) -> String {
+    let mut names: Vec<&str> = allowit_sdk::routing::all()
+        .iter()
+        .flat_map(|rail| std::iter::once(rail.id).chain(rail.aliases.iter().copied()))
+        .collect();
+    // Longer names first, so an identifier that contains another stays whole.
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    for name in names {
+        text = text.replace(name, "<rail>");
+    }
+    text
+}
+
 #[test]
 fn every_help_node_matches_its_snapshot() {
     let update = std::env::var_os("ALLOWIT_UPDATE_SNAPSHOTS").is_some();
@@ -169,6 +184,7 @@ fn every_help_node_matches_its_snapshot() {
         if !text.contains("\nCommands:\n") {
             continue;
         }
+        let text = with_rail_placeholder(text);
         let name = file_name(path);
         let file = dir.join(&name);
         expected_files.insert(name.clone());
@@ -243,7 +259,7 @@ fn unknown_commands_exit_2_and_list_the_commands_at_that_level() {
         "{error}"
     );
     // A global flag's value is not read as a command name.
-    let output = sandbox.run(&["--rail", "stellar:testnet", "policy", "mystery"]);
+    let output = sandbox.run(&["--rail", "example:testnet", "policy", "mystery"]);
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8(output.stderr).unwrap();
     for verb in ["show", "check", "build"] {
@@ -362,4 +378,48 @@ fn help_falls_back_for_unreadable_or_invalid_config_without_repairing_it() {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         assert_eq!(std::fs::read_dir(sandbox.config()).unwrap().count(), 1);
     }
+}
+
+#[test]
+fn version_reports_this_cli_release() {
+    let sandbox = common::Sandbox::new("version");
+    let expected = env!("CARGO_PKG_VERSION");
+    assert_eq!(sandbox.ok(&["version"]), format!("allowit {expected}\n"));
+    assert_eq!(sandbox.ok(&["--version"]), format!("allowit {expected}\n"));
+    assert_eq!(
+        sandbox.json(&["version"]),
+        serde_json::json!({ "version": expected })
+    );
+}
+
+/// `exec --help` names exactly the operations that `rail show` reports for
+/// the compiled rails.
+#[test]
+fn exec_help_names_only_the_operations_that_rail_show_reports() {
+    let sandbox = common::Sandbox::new("exec-ops");
+    let mut reported = BTreeSet::new();
+    for rail in sandbox.json(&["rail", "ls"]).as_array().unwrap() {
+        let show = sandbox.json(&["rail", "show", rail["rail"].as_str().unwrap()]);
+        for op in show["ops"].as_array().unwrap() {
+            reported.insert(op.as_str().unwrap().to_owned());
+        }
+    }
+    let help = sandbox.ok(&["exec", "--help"]);
+    let flag = "\n      --op <OP>";
+    let start = help.find(flag).expect("exec help documents --op");
+    let rest = &help[start + flag.len()..];
+    // The description runs until the next option line.
+    let op_help: String = std::iter::once(rest.lines().next().unwrap_or(""))
+        .chain(
+            rest.lines()
+                .skip(1)
+                .take_while(|line| !line.trim_start().starts_with('-')),
+        )
+        .collect();
+    let named: BTreeSet<String> = ["transfer", "swap", "deposit", "redeem", "custom"]
+        .into_iter()
+        .filter(|op| op_help.contains(op))
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(named, reported, "--op help: {op_help}");
 }

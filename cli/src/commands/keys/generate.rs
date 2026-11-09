@@ -18,10 +18,10 @@ pub(crate) struct Args {
 
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let rail = cx.rail()?;
-    let vendor = cx.vendor()?;
+    let adapter = cx.adapter()?;
     // Refuse a missing faucet before the key exists, so a retry is clean.
-    if args.fund && !vendor.caps().verbs.contains(&"keys fund") {
-        return Err(vendor.na("keys fund"));
+    if args.fund && !adapter.caps().verbs.contains(&"keys fund") {
+        return Err(adapter.na("keys fund"));
     }
     let dir = cx.dir()?;
     let key = keys::generate(&dir, &args.name, rail.id)?;
@@ -34,7 +34,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         // One JSON document: the key, then the faucet result.
         let mut funded = crate::term::Out::new(true, true, false, true);
         std::mem::swap(&mut cx.out, &mut funded);
-        let result = vendor.keys_fund(cx, &key);
+        let result = adapter.keys_fund(cx, &key);
         std::mem::swap(&mut cx.out, &mut funded);
         let mut value = view;
         if let Ok(code) = &result {
@@ -48,5 +48,5 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     cx.out.value(&view);
     cx.out.line("");
-    vendor.keys_fund(cx, &key)
+    adapter.keys_fund(cx, &key)
 }

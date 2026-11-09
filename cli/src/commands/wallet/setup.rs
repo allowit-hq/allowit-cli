@@ -21,9 +21,9 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     cx.confirm("Set the fresh owner's account roles and signing thresholds")?;
-    cx.out.value(&allowit_sdk_engine::owner::setup(
+    cx.out.value(&allowit_sdk::owner::setup(
         &local.context("http://localhost"),
-        allowit_sdk_engine::owner::Setup {
+        allowit_sdk::owner::Setup {
             agent: &agent.address,
             server: &a.server,
             request_id: &a.request_id,

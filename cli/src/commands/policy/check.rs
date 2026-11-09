@@ -11,7 +11,7 @@ pub(crate) struct Args {
 }
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let source = super::read(&args.file)?;
-    let shape = allowit_sdk_engine::authoring::check(&source)?;
-    cx.out.value(&serde_json::json!({"sourceHash":allowit_sdk_engine::digest(source.as_bytes()),"prefix":shape.prefix,"canonicalOnly":shape.canonical_only,"writesState":shape.writes_state}));
+    let shape = allowit_sdk::authoring::check(&source)?;
+    cx.out.value(&serde_json::json!({"sourceHash":allowit_sdk::digest(source.as_bytes()),"prefix":shape.prefix,"canonicalOnly":shape.canonical_only,"writesState":shape.writes_state}));
     Ok(0)
 }
