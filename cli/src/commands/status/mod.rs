@@ -2,10 +2,10 @@
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
+    rails,
     request::request_id_valid,
     routing,
     settings::journal,
-    rails,
 };
 use std::time::Duration;
 

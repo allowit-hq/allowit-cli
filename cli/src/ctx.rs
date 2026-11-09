@@ -5,10 +5,10 @@ use crate::{
     commands::Global,
     error::{Error, Result, quoted},
     exit,
+    rails::{self, Rail},
     routing::{self, RailInfo},
     settings::{self, Settings, keys},
     term::Out,
-    rails::{self, Rail},
 };
 use std::{
     io::IsTerminal,

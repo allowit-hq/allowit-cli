@@ -303,10 +303,15 @@ fn faucet_funding_goes_through_the_rail_plugin_and_its_endpoint() {
             let output = sandbox.run(&["--rail", net, "keys", "fund", "agent"]);
             assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
             // generate --fund refuses before the key exists, so a retry is clean.
-            let output = sandbox.run(&["--rail", net, "--json", "keys", "generate", "pk", "--fund"]);
+            let output =
+                sandbox.run(&["--rail", net, "--json", "keys", "generate", "pk", "--fund"]);
             assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
             assert!(output.stdout.is_empty(), "{net}");
-            assert_ne!(code(&sandbox.run(&["keys", "show", "pk"])), Some(0), "{net}");
+            assert_ne!(
+                code(&sandbox.run(&["keys", "show", "pk"])),
+                Some(0),
+                "{net}"
+            );
         }
     });
 }
@@ -323,7 +328,11 @@ fn invalid_input_fails_before_any_settings_bundle_or_network_access() {
         let fixtures = rail.fixtures;
         let amount = format!("{}:1", fixtures.token.code);
         for (to, amount, needle) in [
-            (fixtures.invalid_address.as_str(), amount.as_str(), "recipient"),
+            (
+                fixtures.invalid_address.as_str(),
+                amount.as_str(),
+                "recipient",
+            ),
             (fixtures.recipient.as_str(), "NOPE:1", "NOPE"),
         ] {
             let args = [
@@ -417,7 +426,10 @@ fn public_profile_shows_without_agent_key_or_engine() {
         assert!(!source.contains('\x1b'));
         // With --json the source is one JSON object.
         let json = sandbox.json(&["--rail", net, "policy", "show", "--source"]);
-        assert_eq!(json["source"].as_str().unwrap().trim_end(), source.trim_end());
+        assert_eq!(
+            json["source"].as_str().unwrap().trim_end(),
+            source.trim_end()
+        );
         assert_eq!(json.as_object().unwrap().len(), 1, "{json}");
         // Explicit selection keeps the same exact public profile binding.
         let wallet = profile["wallet"].as_str().unwrap();

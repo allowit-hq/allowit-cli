@@ -5,7 +5,9 @@ use std::{path::Path, process::Command};
 fn scan(arg: Option<&str>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut command = Command::new("node");
-    command.current_dir(&root).arg("scripts/vendor-boundary.mjs");
+    command
+        .current_dir(&root)
+        .arg("scripts/vendor-boundary.mjs");
     command.args(arg);
     let output = command
         .output()

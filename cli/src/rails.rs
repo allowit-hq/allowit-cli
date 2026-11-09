@@ -80,7 +80,11 @@ pub(crate) fn require_op(rail: &Rail, op: &str) -> Result<()> {
 }
 
 impl Rail {
-    fn profile(&self, cx: &mut Ctx, wallet: Option<&str>) -> Result<allowit_sdk::profiles::Profile> {
+    fn profile(
+        &self,
+        cx: &mut Ctx,
+        wallet: Option<&str>,
+    ) -> Result<allowit_sdk::profiles::Profile> {
         let root = cx.dir()?;
         let selected = match wallet {
             Some(w) => Some(w.into()),
@@ -115,8 +119,7 @@ impl Rail {
         allowit_sdk::execution::tokens(self.0.id).expect("registered rail")
     }
     pub(crate) fn caps(&self) -> Caps {
-        let c =
-            allowit_sdk::execution::capabilities(self.0.id).expect("registered capability");
+        let c = allowit_sdk::execution::capabilities(self.0.id).expect("registered capability");
         Caps {
             curve: c.curve,
             address_is_key: c.address_is_key,
@@ -131,8 +134,7 @@ impl Rail {
         }
         key.check_rail(self.0.id)?;
         let endpoint = env_value("ALLOWIT_FAUCET_URL");
-        let hash =
-            allowit_sdk::execution::fund_key(self.0.id, &key.address, Some(&endpoint))?;
+        let hash = allowit_sdk::execution::fund_key(self.0.id, &key.address, Some(&endpoint))?;
         cx.out.value(&serde_json::json!({
             "key": key.name,
             "address": key.address,
@@ -141,9 +143,13 @@ impl Rail {
         }));
         Ok(0)
     }
-    pub(crate) fn exec_binding(&self, cx: &mut Ctx, wallet: Option<&str>, id: &str) -> Result<Binding> {
-        if let Some(recovery) =
-            allowit_sdk::execution::retained(&cx.dir()?, self.0.id, wallet, id)?
+    pub(crate) fn exec_binding(
+        &self,
+        cx: &mut Ctx,
+        wallet: Option<&str>,
+        id: &str,
+    ) -> Result<Binding> {
+        if let Some(recovery) = allowit_sdk::execution::retained(&cx.dir()?, self.0.id, wallet, id)?
             && recovery.signed()
         {
             let b = recovery.binding();
@@ -167,9 +173,13 @@ impl Rail {
             recovery: None,
         })
     }
-    pub(crate) fn status_binding(&self, cx: &mut Ctx, wallet: Option<&str>, id: &str) -> Result<Binding> {
-        if let Some(recovery) =
-            allowit_sdk::execution::retained(&cx.dir()?, self.0.id, wallet, id)?
+    pub(crate) fn status_binding(
+        &self,
+        cx: &mut Ctx,
+        wallet: Option<&str>,
+        id: &str,
+    ) -> Result<Binding> {
+        if let Some(recovery) = allowit_sdk::execution::retained(&cx.dir()?, self.0.id, wallet, id)?
         {
             let b = recovery.binding();
             return Ok(Binding {

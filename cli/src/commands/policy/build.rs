@@ -17,10 +17,7 @@ pub(crate) struct Args {
 }
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let source = super::read(&args.file)?;
-    allowit_sdk::authoring::compile(
-        &source,
-        &allowit_sdk::authoring::HostTools::default(),
-    )?;
+    allowit_sdk::authoring::compile(&source, &allowit_sdk::authoring::HostTools::default())?;
     match args.out {
         Some(path) => std::fs::write(&path, &source)
             .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?,

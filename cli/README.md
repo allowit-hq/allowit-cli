@@ -63,7 +63,7 @@ allowit version
 ## Rails and build output
 
 The CLI depends only on the AllowIt SDK and names no vendor. The [workspace manifest](../Cargo.toml) pins the SDK. The [lockfile](../Cargo.lock) fixes its source revision and the vendor plugins that it registers.
-The [SDK plugin registration](https://github.com/allowit-hq/allowit-sdk/blob/vendor-plugin-separation/crates/allowit-sdk/src/plugins/registered.rs) is the one place that lists vendor plugins. Each plugin supplies its network identities, aliases, assets and native behavior.
+The [SDK plugin registration](https://github.com/allowit-hq/allowit-sdk/blob/main/crates/allowit-sdk/src/plugins/registered.rs) is the one place that lists vendor plugins. Each plugin supplies its network identities, aliases, assets and native behavior.
 [`src/rails.rs`](src/rails.rs) is one generic adapter for every registered rail. It reaches each rail through the SDK registry.
 
 ```sh

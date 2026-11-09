@@ -289,7 +289,10 @@ mod tests {
     #[test]
     fn generate_add_import_and_remove_keep_secrets_private() {
         use std::os::unix::fs::PermissionsExt;
-        assert!(!allowit_sdk::plugins::rails().is_empty(), "no registered rail");
+        assert!(
+            !allowit_sdk::plugins::rails().is_empty(),
+            "no registered rail"
+        );
         for plugin in allowit_sdk::plugins::rails() {
             let support = plugin.test_support();
             let fixtures = (support.fixtures)();

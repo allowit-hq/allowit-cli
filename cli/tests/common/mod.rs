@@ -238,7 +238,8 @@ pub fn assert_data(text: &str, what: &str) {
 /// Seeds an already verified public profile. Production installation uses
 /// the owner workflow export.
 pub fn public_profile_fixture(sandbox: &Sandbox, profile: &Value, backend: &str) {
-    let store = allowit_sdk::Store::open(&sandbox.config().join("public-profiles/versions")).unwrap();
+    let store =
+        allowit_sdk::Store::open(&sandbox.config().join("public-profiles/versions")).unwrap();
     store
         .save(
             "fixture",
@@ -261,7 +262,10 @@ impl Rail<'_> {
     pub fn account(&self, seed: u8) -> (String, String) {
         let keys = self.plugin.keys();
         let signer = keys.derive(&vec![seed; keys.entropy_bytes()]).unwrap();
-        (signer.address().to_owned(), signer.encoded_secret().to_string())
+        (
+            signer.address().to_owned(),
+            signer.encoded_secret().to_string(),
+        )
     }
 }
 
