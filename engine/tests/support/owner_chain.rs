@@ -69,7 +69,12 @@ impl Rpc for Chain {
             .as_ref()
             .map(|state| state.lock().unwrap().owner_submissions.clone())
             .unwrap_or_default();
-        self.ledger.call(method, params, &submissions)
+        let mut reply = self.ledger.call(method, params, &submissions)?;
+        // Stellar RPC 30 reports an unknown transaction with the unset ledger 0.
+        if method == "getTransaction" && reply["status"] == "NOT_FOUND" {
+            reply["ledger"] = json!(0);
+        }
+        Ok(reply)
     }
 }
 

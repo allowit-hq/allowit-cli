@@ -239,6 +239,32 @@ fn two_phase_exec_verifies_real_signatures_and_unknown_retry_only_recovers() {
     server.join().unwrap();
 }
 
+/// The 2026-11-08 testnet engine took 38 to 138 s to prepare. The agent must
+/// wait for that reply, sign it and submit it in the same `exec`.
+#[test]
+fn exec_waits_for_a_slow_engine_preparation() {
+    let (c, r, s, now) = fixture();
+    let mock = Mock::new();
+    let sandbox = setup(&c, 2, &mock);
+    let listener = mock.listener;
+    let server = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let (_, body) = read(&mut conn);
+        assert_eq!(body["phase"], "prepare");
+        // Longer than the 30 s status and submit timeout.
+        std::thread::sleep(std::time::Duration::from_secs(35));
+        let prepared = sdk::prepare(&c, &r, &s, now, expires(now)).unwrap();
+        ok(&mut conn, response(&prepared, None, "prepared"));
+        let (mut submit, _) = listener.accept().unwrap();
+        let signed = signed_from_submit(&mut submit, &prepared, now);
+        ok(&mut submit, response(&prepared, Some(&signed), "confirmed"));
+    });
+    let out = exec(&sandbox);
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("confirmed"));
+    server.join().unwrap();
+}
+
 #[test]
 fn build_only_prints_the_typed_request_and_sends_nothing() {
     let (c, r, _, _) = fixture();

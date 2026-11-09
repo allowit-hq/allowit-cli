@@ -20,7 +20,7 @@ default = ["stellar"]
 stellar = ["allowit-sdk-engine/stellar"]
 
 [dependencies]
-allowit-sdk-engine = { package = "allowit-sdk", git = "https://github.com/allowit-hq/allowit-sdk.git", tag = "v0.5.0", version = "0.5", default-features = false }
+allowit-sdk-engine = { package = "allowit-sdk", git = "https://github.com/allowit-hq/allowit-sdk.git", rev = "74c76ed9911f72ed44b21d2fb57d1f971ff74322", version = "0.5", default-features = false }
 serde_json_canonicalizer = "0.3"
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4.6"

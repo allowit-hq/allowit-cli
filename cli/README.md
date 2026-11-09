@@ -40,15 +40,24 @@ allowit keys import NAME FILE|-
 allowit keys use NAME
 allowit keys ls | show NAME | fund NAME | export NAME | rm NAME
 allowit config show | path
-allowit wallet ls | show | use ADDR
+allowit wallet ls | show | use ADDR [--profile VERSION]
+allowit wallet import PROFILE_FILE
+allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID
 allowit policy generate --owner-key NAME --origin ORIGIN --profile PROFILE (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
 allowit policy check POLICY.rs
 allowit policy build POLICY.rs [-o OUT]
+allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
+allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
+allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
+allowit policy export SELECTION --owner-key NAME --origin ORIGIN --activation-id ID
+allowit policy owner-status ID
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
+allowit completion --shell SHELL
 allowit guide
+allowit version
 ```
 
 ## Vendors and build output
