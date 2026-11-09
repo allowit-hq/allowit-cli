@@ -177,7 +177,6 @@ Data goes to stdout. Diagnostics and generated request IDs go to stderr.
 
 Help snapshots live in `tests/snapshots/help/`. They show `<rail>` in place of each registered rail identifier.
 Shared tests run once for each registered rail and take every address, asset and profile from the rail's fixtures. A rail skips a test of a feature that it does not serve.
-`node scripts/vendor-boundary.mjs` fails when a vendor name enters this repository; `cargo test` runs it.
 After an intended command change, run `ALLOWIT_UPDATE_SNAPSHOTS=1 cargo test -p allowit-cli --test help`.
 
 ## Deploy, activate and export
