@@ -36,7 +36,9 @@ impl LocalOwner {
         }
     }
 }
-pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
+/// The one owner-key loader: the named key must belong to the selected rail
+/// and match its public metadata.
+pub(crate) fn signer(cx: &mut Ctx, name: &str) -> Result<LocalSigner> {
     let rail = cx.rail()?;
     let key = cx.key(name)?;
     key.check_rail(rail.id)?;
@@ -44,6 +46,11 @@ pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
     if signer.address() != key.address {
         return Err(Error::config("Owner key differs from its public metadata"));
     }
+    Ok(signer)
+}
+pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
+    let rail = cx.rail()?;
+    let signer = signer(cx, name)?;
     let rpc = cx.rpc_url(rail)?.filter(|v| !v.is_empty()).ok_or_else(|| {
         Error::config("Select an independent RPC endpoint with --rpc-url or the rail settings")
     })?;

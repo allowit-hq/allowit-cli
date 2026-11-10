@@ -262,7 +262,7 @@ fn unknown_commands_exit_2_and_list_the_commands_at_that_level() {
     let output = sandbox.run(&["--rail", "example:testnet", "policy", "mystery"]);
     assert_eq!(output.status.code(), Some(2));
     let error = String::from_utf8(output.stderr).unwrap();
-    for verb in ["show", "check", "build"] {
+    for verb in ["show", "check", "generate"] {
         assert!(error.contains(verb), "{verb}: {error}");
     }
     let output = sandbox.run(&["--json", "keys", "nope"]);

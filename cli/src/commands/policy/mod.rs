@@ -1,12 +1,11 @@
-//! Portable source validation, source output and installed-policy inspection.
-mod build;
+//! Portable source validation, generation, owner workflows and installed-policy inspection.
 mod check;
 mod generate;
 mod owner;
 mod show;
 use crate::{ctx::Ctx, error::Result};
 use clap::Subcommand;
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n  allowit policy build policy.rs -o wallet.rs\n  allowit policy show --source";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n  allowit policy check policy.rs --compile\n  allowit policy show --source";
 /// Generate and validate portable policies or inspect an installed policy
 #[derive(Subcommand, Debug)]
 pub(crate) enum Command {
@@ -27,8 +26,6 @@ pub(crate) enum Command {
     Show(show::Args),
     #[command(before_help=check::EXAMPLES)]
     Check(check::Args),
-    #[command(before_help=build::EXAMPLES)]
-    Build(build::Args),
 }
 pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
     match command {
@@ -40,11 +37,10 @@ pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Generate(a) => generate::run(a, cx),
         Command::Show(a) => show::run(a, cx),
         Command::Check(a) => check::run(a, cx),
-        Command::Build(a) => build::run(a, cx),
     }
 }
 pub(crate) fn is_local(command: &Command) -> bool {
-    matches!(command, Command::Check(_) | Command::Build(_))
+    matches!(command, Command::Check(_))
 }
 fn read(path: &std::path::Path) -> Result<String> {
     String::from_utf8(crate::ctx::read_input(path)?)

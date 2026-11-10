@@ -1,6 +1,6 @@
 //! Terminal output. Data goes to stdout, including an owner signing link as
 //! the `signingUrl` field; progress, hints and prompts go to stderr. Text is
-//! the default, also when piped; `--json` (or `--output json`) selects JSON,
+//! the default, also when piped; `--json` alone selects JSON,
 //! and policy source prints as a `source` field. Policy source and JSON documents are
 //! syntax-highlighted only when stdout is a terminal, and never with `--json`,
 //! `NO_COLOR`, `TERM=dumb` or `--no-color`. `CLICOLOR_FORCE` forces color.
@@ -20,7 +20,7 @@ pub(crate) struct Out {
     pub stdout: String,
     pub stderr: String,
     pub json: bool,
-    /// `NO_DNA`: compact JSON, no prompts.
+    /// `NO_DNA`: no prompts, no color and compact `--json` output.
     pub compact: bool,
     pub quiet: bool,
     pub verbose: bool,
@@ -49,7 +49,8 @@ pub(crate) fn color_allowed(no_color_flag: bool, terminal: bool) -> bool {
     env_set("CLICOLOR_FORCE") || terminal
 }
 
-/// `NO_DNA`: compact JSON output and errors, and no prompts.
+/// `NO_DNA`: no prompts, no color and compact `--json` output. It never
+/// selects JSON.
 pub(crate) fn no_dna() -> bool {
     env_set("NO_DNA")
 }

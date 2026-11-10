@@ -83,10 +83,10 @@ An owner can generate a portable draft with a separate named local key:
 ```sh
 allowit keys import owner owner.key
 allowit --json policy generate --owner-key owner --origin http://localhost:5173 \
-  --profile PROFILE --new-wallet 'Pay only my approved recipient'
+  --kind common --new-wallet 'Pay only my approved recipient'
 ```
 
-Use the exact wallet `PROFILE` advertised by the owner's server for the selected adapter.
+`--kind` is `native`, `simple`, `common` or `custom`. The server chooses Simple or Common from the draft's rules.
 The sign-in Origin must be allowed by that backend.
 The owner key does not replace the selected agent key. `--new-wallet` requires an advertised template;
 `--installation ID` explicitly selects an existing owner installation instead.

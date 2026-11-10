@@ -18,8 +18,7 @@ Global options:
   -n, --rail <RAIL>       Rail identifier or alias from rail ls [env: ALLOWIT_RAIL] [alias:
                           --network]
       --wallet <ADDR>     Wallet address accepted by the selected rail [env: ALLOWIT_WALLET]
-      --output <FORMAT>   Output format [possible values: text, json]
-      --json              Same as --output json
+      --json              Print JSON instead of text
   -y, --yes               Confirm destructive actions without a prompt
   -q, --quiet             Print no progress on stderr
   -v, --verbose           Print the resolved rail, wallet and config directory on stderr

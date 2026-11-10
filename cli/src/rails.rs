@@ -217,14 +217,6 @@ impl Rail {
         allowit_sdk::execution::check(self.0.id, op, to, token_out, args.is_some())
     }
     pub(crate) fn exec(&self, cx: &mut Ctx, r: &ExecRequest, binding: Binding) -> Result<i32> {
-        require_op(self, &r.op)?;
-        allowit_sdk::execution::check(
-            self.0.id,
-            &r.op,
-            &r.to,
-            r.token_out.as_ref(),
-            r.args.is_some(),
-        )?;
         let root = cx.dir()?;
         if let Some(recovery) = binding.recovery {
             if r.build_only {
@@ -249,7 +241,7 @@ impl Rail {
         })?;
         let rpc = cx.rpc_url(self.0)?;
         if r.build_only {
-            cx.out.json_value(&allowit_sdk::execution::build(
+            cx.out.value(&allowit_sdk::execution::build(
                 &p,
                 &root,
                 rpc.as_deref(),
