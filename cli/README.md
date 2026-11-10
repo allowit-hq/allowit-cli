@@ -34,7 +34,7 @@ flowchart TB
 
 ```
 allowit rail ls | show [RAIL] | use RAIL | trust ORIGIN PUBLIC_KEY
-allowit keys generate NAME [--fund]
+allowit keys generate NAME
 allowit keys add NAME --public-key ADDR
 allowit keys import NAME FILE|-
 allowit keys use NAME
@@ -43,10 +43,9 @@ allowit config show | path
 allowit wallet ls | show | use ADDR [--profile VERSION]
 allowit wallet import PROFILE_FILE
 allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID
-allowit policy generate --owner-key NAME --origin ORIGIN --profile PROFILE (--new-wallet | --installation ID) PROMPT
+allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|common|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
-allowit policy check POLICY.rs
-allowit policy build POLICY.rs [-o OUT]
+allowit policy check POLICY.rs [--compile]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
 allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
@@ -113,15 +112,16 @@ Select the network and import the owner key by name. Generation does not change 
 allowit rail use RAIL
 allowit keys import owner owner.key
 allowit --json policy generate --owner-key owner --origin http://localhost:5173 \
-  --profile PROFILE --new-wallet \
+  --kind common --new-wallet \
   'Pay only my approved recipient'
 ```
 
 The shared SDK client validates the exact sign-in message before requesting an owner signature.
 Its session stays in memory and is bound to that backend, Origin and owner account.
 `--new-wallet` requires an advertised contract-wallet template. To use an existing owner installation,
-replace it with `--installation ID` and that installation's advertised profile. Selection never falls back between them.
-Use the exact wallet `PROFILE` advertised by the server for the selected adapter.
+replace it with `--installation ID` and that installation's kind. Selection never falls back between them.
+`--kind` selects the server's wallet profile: `native` uses the owner's own account, `simple` and `common` use a policy wallet, and `custom` uses a wallet that runs the complete compiled policy.
+Simple and Common share one profile. The server chooses between them from the draft's rules, and the CLI warns on stderr when the result differs from `--kind`.
 The complete prompt, selected network, profile and transfer operation go to the server.
 Generated source starts its rule sequence with `allowit::operations`, binding the permitted operation set.
 The [authoring contract](../docs/policy-reference.md#authoring-order) defines the order. UI renderers preserve it.
@@ -149,8 +149,8 @@ It queries the configured settlement service for the original packet and verifie
 ## Output and exits
 
 Data goes to stdout. Diagnostics and generated request IDs go to stderr.
-`--json` selects JSON. `NO_DNA` selects compact JSON and disables prompts.
-`--build-only` always prints JSON. Destructive commands need `--yes` without a terminal.
+Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables prompts and color and makes `--json` output compact.
+`--build-only` prints the unsigned request in the same format. Destructive commands need `--yes` without a terminal.
 
 | Exit | Meaning |
 | --- | --- |

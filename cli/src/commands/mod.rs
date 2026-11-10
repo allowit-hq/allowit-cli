@@ -14,7 +14,7 @@ mod version;
 mod wallet;
 
 use crate::{VERSION, ctx::Ctx, error::Result};
-use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::{path::PathBuf, time::Duration};
 
 /// Help layout: about, usage, examples, then commands and options.
@@ -45,12 +45,6 @@ Exit codes:
   signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
   policy, 130 interrupted";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub(crate) enum Format {
-    Text,
-    Json,
-}
-
 /// Flags that every command accepts.
 #[derive(Args, Clone, Debug, Default)]
 #[command(next_help_heading = "Global options")]
@@ -75,10 +69,7 @@ pub(crate) struct Global {
         value_name = "ADDR"
     )]
     pub wallet: Option<String>,
-    /// Output format
-    #[arg(long, value_enum, global = true, value_name = "FORMAT")]
-    pub output: Option<Format>,
-    /// Same as --output json
+    /// Print JSON instead of text
     #[arg(long, global = true)]
     pub json: bool,
     /// Confirm destructive actions without a prompt
@@ -111,18 +102,6 @@ pub(crate) struct Global {
     /// True when `--wallet` is on the command line, not from `ALLOWIT_WALLET`.
     #[arg(skip)]
     pub wallet_flag: bool,
-}
-
-impl Global {
-    /// JSON with `--json` or `--output json`; also with `NO_DNA` unless
-    /// `--output text` asks for text.
-    pub(crate) fn json_output(&self) -> bool {
-        self.json
-            || match self.output {
-                Some(format) => format == Format::Json,
-                None => crate::term::no_dna(),
-            }
-    }
 }
 
 #[derive(Parser, Debug)]
@@ -303,7 +282,6 @@ const VALUE_FLAGS: &[&str] = &[
     "-n",
     "--network",
     "--wallet",
-    "--output",
     "--config-dir",
     "--rpc-url",
 ];
@@ -444,7 +422,7 @@ mod tests {
         };
         for line in [
             "keys use agent --json",
-            "--output json policy build policy.rs -o out.rs",
+            "--json policy check policy.rs --compile",
             "rail show example:mainnet --rail example:testnet",
             "rail use example:testnet --json",
             "exec --op transfer --to G --amount 1 --wallet C --rail example:testnet",

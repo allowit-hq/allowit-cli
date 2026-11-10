@@ -44,7 +44,7 @@ Trusted hosts supply enrichment and application accounting; request JSON cannot 
 
 ```sh
 allowit policy check policy.rs
-allowit policy build policy.rs -o wallet.rs
+allowit policy check policy.rs --compile
 allowit policy show --source
 ```
 

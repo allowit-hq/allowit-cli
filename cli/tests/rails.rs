@@ -302,16 +302,6 @@ fn faucet_funding_goes_through_the_rail_plugin_and_its_endpoint() {
             let net = info.id;
             let output = sandbox.run(&["--rail", net, "keys", "fund", "agent"]);
             assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
-            // generate --fund refuses before the key exists, so a retry is clean.
-            let output =
-                sandbox.run(&["--rail", net, "--json", "keys", "generate", "pk", "--fund"]);
-            assert_eq!(code(&output), Some(3), "{net}: {}", stderr(&output));
-            assert!(output.stdout.is_empty(), "{net}");
-            assert_ne!(
-                code(&sandbox.run(&["keys", "show", "pk"])),
-                Some(0),
-                "{net}"
-            );
         }
     });
 }
@@ -514,25 +504,42 @@ fn arguments_that_are_not_utf8_are_usage_errors() {
 }
 
 #[test]
-fn no_dna_selects_compact_json_for_results_and_errors() {
+fn only_the_json_flag_selects_json_with_and_without_no_dna() {
     let mut sandbox = Sandbox::new("no-dna");
-    sandbox.set("NO_DNA", "1");
-    for args in [&["version"][..], &["rail", "ls"]] {
-        let text = stdout(&sandbox.run(args));
-        assert_eq!(text.lines().count(), 1, "{args:?}: {text}");
-        serde_json::from_str::<Value>(&text).unwrap();
+    for no_dna in [false, true] {
+        if no_dna {
+            sandbox.set("NO_DNA", "1");
+        }
+        // Piped output is text: the test harness reads stdout through a pipe.
+        for args in [&["keys", "ls"][..], &["version"], &["rail", "ls"]] {
+            let text = stdout(&sandbox.run(args));
+            assert!(
+                serde_json::from_str::<Value>(&text).is_err(),
+                "{args:?}: {text}"
+            );
+            let mut json = vec!["--json"];
+            json.extend_from_slice(args);
+            let text = stdout(&sandbox.run(&json));
+            serde_json::from_str::<Value>(&text).unwrap();
+            // `NO_DNA` makes the JSON compact; it never selects it.
+            // An empty key list is one line in both forms.
+            if args[0] != "keys" {
+                assert_eq!(text.lines().count() == 1, no_dna, "{args:?}: {text}");
+            }
+        }
+        let output = sandbox.run(&["wallet", "show"]);
+        assert_eq!(code(&output), Some(3));
+        assert!(serde_json::from_str::<Value>(&stderr(&output)).is_err());
+        let output = sandbox.run(&["--json", "exec", "--nope"]);
+        assert_eq!(code(&output), Some(2));
+        let error: Value = serde_json::from_str(&stderr(&output)).unwrap();
+        assert_eq!(error["error"]["exit"], 2);
     }
-    let output = sandbox.run(&["wallet", "show"]);
-    assert_eq!(code(&output), Some(3));
-    let error: Value = serde_json::from_str(&stderr(&output)).unwrap();
-    assert_eq!(error["error"]["exit"], 3);
-    let output = sandbox.run(&["exec", "--nope"]);
-    assert_eq!(code(&output), Some(2));
-    let error: Value = serde_json::from_str(&stderr(&output)).unwrap();
-    assert_eq!(error["error"]["exit"], 2);
-    // `--output text` still asks for text.
-    let text = stdout(&sandbox.run(&["--output", "text", "version"]));
-    assert!(serde_json::from_str::<Value>(&text).is_err(), "{text}");
+    // The removed format flag is a usage error.
+    assert_eq!(
+        code(&sandbox.run(&["--output", "json", "version"])),
+        Some(2)
+    );
 }
 
 #[test]

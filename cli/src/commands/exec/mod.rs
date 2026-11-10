@@ -48,7 +48,7 @@ pub(crate) struct RequestArgs {
 pub(crate) struct Args {
     #[command(flatten)]
     pub request: RequestArgs,
-    /// Print the request as JSON for a signer outside the CLI; the CLI never signs or submits it
+    /// Print the unsigned request for a signer outside the CLI; the CLI never signs or submits it
     #[arg(long)]
     pub build_only: bool,
 }
@@ -81,7 +81,8 @@ pub(crate) fn check_op(op: &str) -> Result<()> {
     }
 }
 
-/// Builds, journals and sends one `exec` request.
+/// Validates, builds, journals and sends one `exec` request. Every input
+/// check runs here, once; the rail adapter receives a checked request.
 pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i32> {
     check_op(&a.op)?;
     let rail = cx.rail()?;

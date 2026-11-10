@@ -46,18 +46,9 @@ pub fn run_os(args: Vec<std::ffi::OsString>) -> i32 {
 
 /// True when the arguments before `--` ask for JSON output.
 fn json_requested(argv: &[String]) -> bool {
-    let flags: Vec<&str> = argv
-        .iter()
+    argv.iter()
         .take_while(|a| a.as_str() != "--")
-        .map(String::as_str)
-        .collect();
-    let output = |format: &str| {
-        flags
-            .windows(2)
-            .any(|w| w[0] == "--output" && w[1] == format)
-            || flags.contains(&format!("--output={format}").as_str())
-    };
-    flags.contains(&"--json") || output("json") || (term::no_dna() && !output("text"))
+        .any(|a| a == "--json")
 }
 
 /// Writes a usage error to stderr: one JSON object, or the text.
@@ -119,12 +110,7 @@ fn strip_ansi(text: &str) -> String {
 
 fn execute(cli: commands::Cli) -> i32 {
     let global = cli.global;
-    let mut out = Out::new(
-        global.json_output(),
-        global.quiet,
-        global.verbose,
-        global.no_color,
-    );
+    let mut out = Out::new(global.json, global.quiet, global.verbose, global.no_color);
     out.live = true;
     let mut cx = ctx::Ctx::new(global, out);
     let Some(command) = cli.command else {

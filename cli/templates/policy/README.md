@@ -8,7 +8,7 @@ The crate uses the portable `allowit` package's host `std` feature. Vendor bindi
 ```sh
 cargo test --locked -p allowit-policy-template
 allowit policy check cli/templates/policy/src/policy.rs
-allowit policy build cli/templates/policy/src/policy.rs -o wallet.rs
+allowit policy check cli/templates/policy/src/policy.rs --compile
 ```
 
 The template first checks the owner-approved operation set, then the daily and per-payment limits.
