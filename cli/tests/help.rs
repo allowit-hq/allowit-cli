@@ -402,10 +402,10 @@ fn version_reports_this_cli_release() {
 fn version_names_the_git_revision_of_the_build() {
     let revision = allowit_cli::REVISION;
     let hash = revision.strip_suffix("-dirty").unwrap_or(revision);
-    assert!(
-        revision == "unknown" || (hash.len() == 12 && hash.bytes().all(|b| b.is_ascii_hexdigit())),
-        "{revision}"
-    );
+    // One word: a commit hash, `unknown` or the text of ALLOWIT_BUILD_REVISION.
+    let word = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-');
+    assert!(!hash.is_empty() && hash.bytes().all(word), "{revision}");
+    let commit = hash.len() >= 12 && hash.bytes().all(|b| b.is_ascii_hexdigit());
     // This test binary and the command come from one checkout, so git
     // reports the commit that the build recorded.
     let git = |args: &[&str]| {
@@ -417,7 +417,8 @@ fn version_names_the_git_revision_of_the_build() {
             .filter(|output| output.status.success())
             .map(|output| String::from_utf8(output.stdout).unwrap().trim().to_owned())
     };
-    if std::env::var_os("ALLOWIT_BUILD_REVISION").is_none()
+    if commit
+        && std::env::var_os("ALLOWIT_BUILD_REVISION").is_none()
         && let Some(head) = git(&["rev-parse", "--short=12", "HEAD"])
     {
         assert_eq!(hash, head);

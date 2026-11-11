@@ -67,8 +67,9 @@ fn git(directory: &str, args: &[&str]) -> Option<String> {
 /// HEAD or a file that git does not ignore is untracked.
 fn git_revision(directory: &str) -> Option<String> {
     let hash = git(directory, &["rev-parse", "--short=12", "HEAD"]).filter(|v| revision_text(v))?;
-    // A tree whose state cannot be read is not reported as clean.
-    let dirty =
-        git(directory, &["status", "--porcelain"]).is_none_or(|changes| !changes.is_empty());
+    // A tree whose state cannot be read is not reported as clean. The read takes no optional
+    // lock, so it never rewrites the index that this script watches.
+    let dirty = git(directory, &["--no-optional-locks", "status", "--porcelain"])
+        .is_none_or(|changes| !changes.is_empty());
     Some(if dirty { format!("{hash}-dirty") } else { hash })
 }
