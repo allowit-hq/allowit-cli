@@ -21,7 +21,7 @@ Examples:
 pub(crate) struct Args {
     /// The request ID that exec printed
     pub id: String,
-    /// Wait up to DUR for a final state
+    /// Bound status polling to DUR for a final state
     #[arg(long, value_name = "DUR", default_value = "0", value_parser = super::parse_wait)]
     pub wait: Duration,
 }

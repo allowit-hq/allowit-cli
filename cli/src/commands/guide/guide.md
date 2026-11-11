@@ -74,6 +74,9 @@ Use only operations reported by `rail show`.
 The selected key must match the profile's agent before signing.
 `exec` prints a generated request ID on stderr when none was supplied.
 After exit 5, retry only with the same `--request-id`, or read the result with `status`.
+`--wait` bounds status polling only; prepare and submit are not bounded.
+A settled result shows its transaction, height, fee and explorer link, with each amount in the asset's unit.
+When the result carries them, it also shows the charged fee and each spending limit: limit, spent and remaining.
 `history` lists local requests.
 
 ## Generate an owner draft
@@ -83,10 +86,12 @@ An owner can generate a portable draft with a separate named local key:
 ```sh
 allowit keys import owner owner.key
 allowit --json policy generate --owner-key owner --origin http://localhost:5173 \
-  --kind common --new-wallet 'Pay only my approved recipient'
+  --kind standard --new-wallet 'Pay only my approved recipient'
 ```
 
-`--kind` is `native`, `simple`, `common` or `custom`. The server chooses Simple or Common from the draft's rules.
+`--kind` is `native`, `simple`, `standard` or `custom`. `allowit policy kinds` explains each kind of the
+selected rail, and `allowit policy kinds --server` lists the kinds that the server accepts.
+The draft's `walletKind` names the kind that the server bound; the CLI refuses a draft of another kind.
 The sign-in Origin must be allowed by that backend.
 The owner key does not replace the selected agent key. `--new-wallet` requires an advertised template;
 `--installation ID` explicitly selects an existing owner installation instead.
@@ -101,7 +106,7 @@ After uncertain generation, inspect the owner workspace before creating another 
 | 0 | ok | |
 | 2 | usage error | fix the command |
 | 3 | configuration, or not available on this rail | follow the hint |
-| 4 | rejected by the contract (paused, wrong asset) | ask the owner |
+| 4 | rejected by the contract (paused, wrong asset), or refused by the server with a code | ask the owner |
 | 5 | uncertain | preserve the original operation; inspect an uncertain generation before creating another |
 | 6 | replayed | the earlier result stands |
 | 7 | network unavailable | check the network, then retry with the same request ID |
@@ -113,5 +118,6 @@ After uncertain generation, inspect the owner workspace before creating another 
 ## Output
 
 Text is the default. Add `--json` for JSON. Data goes to stdout, including an
-owner signing link, which is the `signingUrl` field. Hints and request IDs go
-to stderr.
+owner signing link, which is the `signingUrl` field. Hints, request IDs and the
+progress of long steps go to stderr; `-q` drops progress, and `--json` prints it
+only with `-v`.

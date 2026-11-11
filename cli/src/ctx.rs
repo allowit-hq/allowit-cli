@@ -118,12 +118,36 @@ impl Ctx {
         }
         Ok(self.settings()?.rail(rail.id).rpc_url)
     }
+    /// The Allowit server URL from `ALLOWIT_URL`. A command that needs the
+    /// server fails here, before any key access, when the URL is not set.
+    pub(crate) fn server_url(&self) -> Result<String> {
+        let url = crate::config::env_value("ALLOWIT_URL");
+        if url.trim().is_empty() {
+            return Err(Error::config(
+                "ALLOWIT_URL is not set; set it to the URL of the Allowit server",
+            ));
+        }
+        Ok(url)
+    }
+    /// The server identity that `rail trust` pinned for the `ALLOWIT_URL`
+    /// origin on this rail.
     pub(crate) fn server_authority(
         &mut self,
         rail: &RailInfo,
     ) -> Result<allowit_sdk::config::ServerAuthority> {
-        let origin = crate::config::parse_origin(&crate::config::env_value("ALLOWIT_URL"))?;
-        let key=self.settings()?.rail(rail.id).server_authorities.get(&origin).cloned().ok_or_else(||Error::config("Configure independent server authority with allowit rail trust ORIGIN PUBLIC_KEY"))?;
+        let origin = crate::config::parse_origin(&self.server_url()?)?;
+        let key = self
+            .settings()?
+            .rail(rail.id)
+            .server_authorities
+            .get(&origin)
+            .cloned()
+            .ok_or_else(|| {
+                Error::config(format!(
+                    "no trusted server key for {origin} on {}; run allowit rail trust {origin} PUBLIC_KEY",
+                    rail.id
+                ))
+            })?;
         allowit_sdk::config::ServerAuthority::new(rail.id, &origin, &key)
     }
     /// Confirms a destructive action: `--yes`, or a prompt on a terminal.

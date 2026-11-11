@@ -10,7 +10,8 @@ pub(crate) enum Exit {
     Usage = 2,
     /// Configuration, authentication, or not supported on this rail.
     Config = 3,
-    /// Rejected by the contract, for example a paused wallet or a wrong asset.
+    /// Rejected by the contract, for example a paused wallet or a wrong asset,
+    /// or refused by the server with a typed code.
     Rejected = 4,
     /// Uncertain or stale: retry with the same request ID.
     Uncertain = 5,
@@ -34,7 +35,7 @@ pub(crate) const TABLE: &[(Exit, &str)] = &[
     ),
     (
         Exit::Rejected,
-        "rejected by the contract (paused, wrong asset)",
+        "rejected by the contract (paused, wrong asset) or refused by the server",
     ),
     (
         Exit::Uncertain,

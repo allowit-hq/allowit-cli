@@ -8,8 +8,10 @@ pub(crate) use allowit_sdk::{config, output, request};
 mod commands;
 mod ctx;
 mod exit;
+mod kinds;
 mod owner;
 mod rails;
+mod receipt;
 mod routing;
 mod settings;
 mod term;
@@ -112,6 +114,7 @@ fn execute(cli: commands::Cli) -> i32 {
     let global = cli.global;
     let mut out = Out::new(global.json, global.quiet, global.verbose, global.no_color);
     out.live = true;
+    allowit_sdk::progress::set_sink(progress_sink(global.json, global.quiet, global.verbose));
     let mut cx = ctx::Ctx::new(global, out);
     let Some(command) = cli.command else {
         return 0;
@@ -134,6 +137,30 @@ fn execute(cli: commands::Cli) -> i32 {
     finish(cx.out, result)
 }
 
+/// One long provider step as a stderr line, or `None` when the flags keep
+/// stderr quiet. Text mode prints the step unless `-q` is set. With `--json`,
+/// stderr holds JSON objects only, so a step prints only with `-v`, as one
+/// `{"progress":{"message":…}}` object. Stdout never receives a step.
+fn progress_line(json: bool, quiet: bool, verbose: bool, step: &str) -> Option<String> {
+    match (json, quiet, verbose) {
+        (_, true, _) | (true, _, false) => None,
+        (true, false, true) => Some(json!({"progress": {"message": step}}).to_string()),
+        (false, false, _) => Some(step.to_owned()),
+    }
+}
+
+type ProgressSink = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
+/// The sink that writes each provider step to stderr as it happens.
+fn progress_sink(json: bool, quiet: bool, verbose: bool) -> Option<ProgressSink> {
+    progress_line(json, quiet, verbose, "")?;
+    Some(std::sync::Arc::new(move |step: &str| {
+        if let Some(line) = progress_line(json, quiet, verbose, step) {
+            let _ = writeln!(std::io::stderr(), "{}", redact(line));
+        }
+    }))
+}
+
 fn finish(mut out: Out, result: error::Result<i32>) -> i32 {
     let code = match result {
         Ok(code) => code,
@@ -154,18 +181,26 @@ fn finish(mut out: Out, result: error::Result<i32>) -> i32 {
     code
 }
 
+/// Writes an error to stderr. A typed server refusal keeps the server's
+/// stable code: `api_code` in JSON, and before the message in text.
 fn render_error(out: &mut Out, e: &Error) {
     if out.json {
-        let value = json!({"error":{
+        let mut value = json!({"error":{
             "code": Exit::from_code(e.code).name(),
             "exit": e.code,
             "message": e.message,
             "request_id": out.request_id,
         }});
+        if let Some(code) = &e.api_code {
+            value["error"]["api_code"] = code.as_str().into();
+        }
         out.stderr += &format!("{value}\n");
     } else {
         let label = out.error_label();
-        out.stderr += &format!("{label} {}\n", e.message);
+        match &e.api_code {
+            Some(code) => out.stderr += &format!("{label} {code}: {}\n", e.message),
+            None => out.stderr += &format!("{label} {}\n", e.message),
+        }
     }
 }
 
@@ -233,6 +268,62 @@ mod display_tests {
             "name  agent\\u{1b}]52;c;aGk=\\u{7}\nnote  a\\u{202e}b\tc\\u{d}\n"
         );
         assert_eq!(super::safe_output("plain\n".into()), "plain\n");
+    }
+    #[test]
+    fn a_typed_server_refusal_prints_its_code_and_keeps_its_exit_code() {
+        use crate::error::Error;
+        // (HTTP status, server code, exit code): typed refusals are final,
+        // a pending transaction is uncertain and an unavailable network retries.
+        for (status, code, exit) in [
+            (400, "wallet_kind_unsupported", 4),
+            (400, "wallet_kind_unknown", 4),
+            (409, "owner_transaction_expired", 4),
+            (409, "owner_transaction_settled", 4),
+        ] {
+            let error = Error::refused(status, code, "the server's reason");
+            assert_eq!(error.code, exit, "{code}");
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(&mut out, &error);
+            assert_eq!(
+                out.stderr,
+                format!("error: {code}: Allowit returned HTTP {status}: the server's reason\n")
+            );
+            let mut out = crate::term::Out::new(true, true, false, true);
+            out.request_id = Some("deploy-0001".into());
+            super::render_error(&mut out, &error);
+            let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({"error": {
+                    "code": "rejected", "exit": exit, "api_code": code,
+                    "message": format!("Allowit returned HTTP {status}: the server's reason"),
+                    "request_id": "deploy-0001",
+                }})
+            );
+        }
+        // An untyped error keeps the JSON shape without `api_code`.
+        let mut out = crate::term::Out::new(true, true, false, true);
+        super::render_error(&mut out, &Error::uncertain("no answer"));
+        let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+        assert!(value["error"].get("api_code").is_none());
+        assert_eq!(value["error"]["exit"], 5);
+    }
+    #[test]
+    fn progress_goes_to_stderr_text_and_stays_out_of_json_unless_verbose() {
+        // (json, quiet, verbose) -> the stderr line of one step.
+        assert_eq!(
+            super::progress_line(false, false, false, "Submitting").as_deref(),
+            Some("Submitting")
+        );
+        assert_eq!(super::progress_line(false, true, false, "Submitting"), None);
+        assert_eq!(super::progress_line(true, false, false, "Submitting"), None);
+        assert_eq!(
+            super::progress_line(true, false, true, "Submitting").as_deref(),
+            Some(r#"{"progress":{"message":"Submitting"}}"#)
+        );
+        assert!(super::progress_sink(false, false, false).is_some());
+        assert!(super::progress_sink(true, false, false).is_none());
+        assert!(super::progress_sink(false, true, false).is_none());
     }
     #[test]
     fn an_error_keeps_the_exit_code_that_its_command_set() {

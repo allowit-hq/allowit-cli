@@ -3,6 +3,7 @@ Generate and validate portable policies or inspect an installed policy
 Usage: allowit policy [OPTIONS] <COMMAND>
 
 Examples:
+  allowit policy kinds
   allowit policy check policy.rs
   allowit policy check policy.rs --compile
   allowit policy show --source
@@ -13,6 +14,8 @@ Commands:
   fund          Fund the selected policy wallet
   activate      Approve exact policy source and parameters
   export        Verify and cache the active public profile
+  kinds         List the wallet kinds of the selected rail: what enforces the policy and what holds
+                the funds
   generate      Generate a portable draft through the owner-authenticated server; does not deploy or
                 spend
   show          Show the wallet's installed policy

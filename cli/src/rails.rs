@@ -191,9 +191,21 @@ impl Rail {
         }
         self.exec_binding(cx, wallet, id)
     }
+    /// The public description of a profile with the wallet kind that it
+    /// binds, when the rail reports one.
+    fn inspect(&self, p: &allowit_sdk::profiles::Profile) -> Result<serde_json::Value> {
+        let mut out = p.inspect()?;
+        if out.get(crate::kinds::KEY).is_none()
+            && let Ok(document) = serde_json::to_vec(&p.document()?)
+            && let Ok(kind) = allowit_sdk::kinds::wallet_kind(self.0.id, &document)
+        {
+            out[crate::kinds::KEY] = kind.id().into();
+        }
+        Ok(out)
+    }
     pub(crate) fn wallet_show(&self, cx: &mut Ctx, wallet: Option<&str>) -> Result<i32> {
         let p = self.profile(cx, wallet)?;
-        cx.out.value(&p.inspect()?);
+        cx.out.value(&self.inspect(&p)?);
         Ok(0)
     }
     pub(crate) fn policy_show(&self, cx: &mut Ctx, source: bool) -> Result<i32> {
@@ -201,7 +213,7 @@ impl Rail {
         if source {
             cx.out.source(&p.description().source);
         } else {
-            let mut out = p.inspect()?;
+            let mut out = self.inspect(&p)?;
             out["asset"] = out["assetSymbol"].clone();
             cx.out.value(&out);
         }
@@ -224,16 +236,19 @@ impl Rail {
                     "Original signed operations support receipt recovery only",
                 ));
             }
+            let server = cx.server_url()?;
+            let signer = self.signer(cx)?;
+            crate::flush_stderr(&mut cx.out.stderr);
             let out = allowit_sdk::execution::recover(
                 recovery,
-                self.signer(cx)?,
-                &env_value("ALLOWIT_URL"),
+                signer,
+                &server,
                 &root,
                 &r.request_id,
                 r.wait,
                 Some(r),
             )?;
-            cx.out.value(&out.document);
+            crate::receipt::show(&mut cx.out, self.0.id, out.document);
             return Ok(crate::exit::execution_status(out.status).code());
         }
         let p = binding.profile.ok_or_else(|| {
@@ -252,7 +267,7 @@ impl Rail {
         let signer = self.signer(cx)?;
         crate::flush_stderr(&mut cx.out.stderr);
         let out = allowit_sdk::execution::execute(p, signer, &root, rpc, r)?;
-        cx.out.value(&out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document);
         Ok(crate::exit::execution_status(out.status).code())
     }
     pub(crate) fn status(
@@ -266,23 +281,22 @@ impl Rail {
         let signer = self.signer(cx)?;
         let root = cx.dir()?;
         let out = if let Some(recovery) = binding.recovery {
-            let selected = env_value("ALLOWIT_URL");
-            allowit_sdk::execution::recover(
-                recovery,
-                signer,
-                backend.unwrap_or(&selected),
-                &root,
-                id,
-                wait,
-                None,
-            )?
+            // The journal's origin serves a retained request; ALLOWIT_URL is the fallback.
+            let server = match backend {
+                Some(origin) => origin.to_owned(),
+                None => cx.server_url()?,
+            };
+            crate::flush_stderr(&mut cx.out.stderr);
+            allowit_sdk::execution::recover(recovery, signer, &server, &root, id, wait, None)?
         } else {
             let p = binding.profile.ok_or_else(|| {
                 crate::error::Error::config("Status has no resolved profile or retained operation")
             })?;
-            allowit_sdk::execution::status(p, signer, &root, cx.rpc_url(self.0)?, id, wait)?
+            let rpc = cx.rpc_url(self.0)?;
+            crate::flush_stderr(&mut cx.out.stderr);
+            allowit_sdk::execution::status(p, signer, &root, rpc, id, wait)?
         };
-        cx.out.value(&out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document);
         Ok(crate::exit::execution_status(out.status).code())
     }
 }

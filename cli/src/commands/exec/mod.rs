@@ -38,7 +38,7 @@ pub(crate) struct RequestArgs {
     /// Request ID; a retry reuses it [default: a new ID, printed on stderr]
     #[arg(long, value_name = "ID")]
     pub request_id: Option<String>,
-    /// Wait up to DUR for a final result
+    /// Bound status polling to DUR; prepare and submit are not bounded
     #[arg(long, value_name = "DUR", default_value = "60s", value_parser = super::parse_wait)]
     pub wait: Duration,
 }
