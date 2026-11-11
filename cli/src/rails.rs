@@ -191,9 +191,95 @@ impl Rail {
         }
         self.exec_binding(cx, wallet, id)
     }
+    /// The public description of a profile with the wallet kind that it
+    /// binds, when the rail reports one, and its params as an owner reads
+    /// them. Returns the JSON document and the document that text prints.
+    ///
+    /// JSON keeps `params` as stored and adds `paramsDisplay`: one entry per
+    /// param with its label, its value in human units and, for an amount,
+    /// the unit of the installed asset. Text prints that value in place of
+    /// the stored one, so an amount never appears as bare base units.
+    fn inspect(
+        &self,
+        p: &allowit_sdk::profiles::Profile,
+    ) -> Result<(serde_json::Value, serde_json::Value)> {
+        let mut out = p.inspect()?;
+        if out.get(crate::kinds::KEY).is_none()
+            && let Ok(document) = serde_json::to_vec(&p.document()?)
+            && let Ok(kind) = allowit_sdk::kinds::wallet_kind(self.0.id, &document)
+        {
+            out[crate::kinds::KEY] = kind.id().into();
+        }
+        let mut text = out.clone();
+        if let Some(fields) = self.param_fields(p, &out) {
+            text["params"] = fields
+                .iter()
+                .map(|field| (field.key.clone(), field.shown.clone().into()))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
+            out["paramsDisplay"] = fields
+                .iter()
+                .map(|field| {
+                    serde_json::json!({
+                        "key": field.key, "label": field.label,
+                        "shown": field.shown, "unit": field.unit,
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into();
+        }
+        Ok((out, text))
+    }
+    /// The params of a profile in the order in which its source reads them,
+    /// through the SDK's param display. `None` when the profile has no
+    /// params or the rail does not know the installed asset: the stored
+    /// values then print unchanged, never with a placeholder unit.
+    fn param_fields(
+        &self,
+        p: &allowit_sdk::profiles::Profile,
+        inspected: &serde_json::Value,
+    ) -> Option<Vec<allowit_sdk::parameters::Field>> {
+        use allowit_sdk::parameters::{Asset, Parameters, fields, known_assets};
+        let params = inspected.get("params")?.as_object()?.clone();
+        if params.is_empty() {
+            return None;
+        }
+        let description = p.description();
+        let known = known_assets(self.0.id).unwrap_or_default();
+        let asset = known
+            .iter()
+            .find(|asset| asset.address == description.asset)
+            .cloned()
+            .or_else(|| {
+                // The rail may know the asset by its identity alone.
+                let display =
+                    allowit_sdk::kinds::asset_display(self.0.id, &description.asset).ok()?;
+                Some(Asset {
+                    symbol: display.symbol,
+                    address: description.asset.clone(),
+                    decimals: display.decimals.into(),
+                })
+            })?;
+        let draft = Parameters {
+            params,
+            kinds: Default::default(),
+            asset,
+            known,
+            unresolved: vec![],
+        };
+        Some(fields(&draft, &description.source))
+    }
+    fn show(cx: &mut Ctx, json: &serde_json::Value, text: &serde_json::Value) {
+        if cx.out.json {
+            cx.out.json_value(json);
+        } else {
+            cx.out.text(text);
+        }
+    }
     pub(crate) fn wallet_show(&self, cx: &mut Ctx, wallet: Option<&str>) -> Result<i32> {
         let p = self.profile(cx, wallet)?;
-        cx.out.value(&p.inspect()?);
+        let (json, text) = self.inspect(&p)?;
+        Self::show(cx, &json, &text);
         Ok(0)
     }
     pub(crate) fn policy_show(&self, cx: &mut Ctx, source: bool) -> Result<i32> {
@@ -201,9 +287,11 @@ impl Rail {
         if source {
             cx.out.source(&p.description().source);
         } else {
-            let mut out = p.inspect()?;
-            out["asset"] = out["assetSymbol"].clone();
-            cx.out.value(&out);
+            let (mut json, mut text) = self.inspect(&p)?;
+            for out in [&mut json, &mut text] {
+                out["asset"] = out["assetSymbol"].clone();
+            }
+            Self::show(cx, &json, &text);
         }
         Ok(0)
     }
@@ -224,16 +312,21 @@ impl Rail {
                     "Original signed operations support receipt recovery only",
                 ));
             }
+            // A retained operation holds its own server origin; ALLOWIT_URL
+            // serves only a record without one, so it may be unset here.
+            let server = env_value("ALLOWIT_URL");
+            let signer = self.signer(cx)?;
+            crate::flush_stderr(&mut cx.out.stderr);
             let out = allowit_sdk::execution::recover(
                 recovery,
-                self.signer(cx)?,
-                &env_value("ALLOWIT_URL"),
+                signer,
+                &server,
                 &root,
                 &r.request_id,
                 r.wait,
                 Some(r),
             )?;
-            cx.out.value(&out.document);
+            crate::receipt::show(&mut cx.out, self.0.id, out.document);
             return Ok(crate::exit::execution_status(out.status).code());
         }
         let p = binding.profile.ok_or_else(|| {
@@ -252,7 +345,7 @@ impl Rail {
         let signer = self.signer(cx)?;
         crate::flush_stderr(&mut cx.out.stderr);
         let out = allowit_sdk::execution::execute(p, signer, &root, rpc, r)?;
-        cx.out.value(&out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document);
         Ok(crate::exit::execution_status(out.status).code())
     }
     pub(crate) fn status(
@@ -266,23 +359,23 @@ impl Rail {
         let signer = self.signer(cx)?;
         let root = cx.dir()?;
         let out = if let Some(recovery) = binding.recovery {
-            let selected = env_value("ALLOWIT_URL");
-            allowit_sdk::execution::recover(
-                recovery,
-                signer,
-                backend.unwrap_or(&selected),
-                &root,
-                id,
-                wait,
-                None,
-            )?
+            // The journal's origin serves a retained request. ALLOWIT_URL is
+            // the fallback for a record without one, and may be unset.
+            let server = match backend {
+                Some(origin) => origin.to_owned(),
+                None => env_value("ALLOWIT_URL"),
+            };
+            crate::flush_stderr(&mut cx.out.stderr);
+            allowit_sdk::execution::recover(recovery, signer, &server, &root, id, wait, None)?
         } else {
             let p = binding.profile.ok_or_else(|| {
                 crate::error::Error::config("Status has no resolved profile or retained operation")
             })?;
-            allowit_sdk::execution::status(p, signer, &root, cx.rpc_url(self.0)?, id, wait)?
+            let rpc = cx.rpc_url(self.0)?;
+            crate::flush_stderr(&mut cx.out.stderr);
+            allowit_sdk::execution::status(p, signer, &root, rpc, id, wait)?
         };
-        cx.out.value(&out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document);
         Ok(crate::exit::execution_status(out.status).code())
     }
 }

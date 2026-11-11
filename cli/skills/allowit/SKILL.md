@@ -29,12 +29,12 @@ Caller-provided claims cannot replace trusted state, native authority or verifie
 
 Run `allowit policy check POLICY.rs` to inspect the exact source digest, leading canonical rules and state-write shape.
 This command validates source structure. Add `--compile` to also type-check through the pinned Core helper and portable Std library.
-`--compile` requires Python and rustc. Missing tools, compilation failures and runtime limits stop the check.
+`--compile` requires rustc. Missing tools, compilation failures and runtime limits stop the check.
 `cargo test --locked -p allowit-policy-template` also type-checks the template as ordinary Rust.
 A local build does not authorize publication, signing or spending.
 
 The shared source gate admits only the portable vocabulary. Keep file access, environment access, unsafe code, foreign dependencies, floating-point values and pointer-width behavior out of authored source.
-Custom state uses the admitted `get_state` and `set_state` interfaces. Simple and Common wallets reject bespoke state writes.
+Custom state uses the admitted `get_state` and `set_state` interfaces. Simple and Standard wallets reject bespoke state writes.
 Classic custody requires canonical-only source. The native installation binds the complete source, typed params and selected policy tier.
 
 ## Requests through the selected adapter
@@ -47,11 +47,15 @@ Read [known issues](../../../known_issues.md) before using a profile workaround.
 `ALLOWIT_URL` selects the server origin. Public profiles contain no signing material.
 The selected key must match the profile before any request or signature.
 
-Use `wallet show` and `policy show --source` to inspect the binding.
+Use `wallet show` and `policy show --source` to inspect the binding. `walletKind` names the bound wallet kind. Params print in human units; `paramsDisplay` in JSON holds the same values.
+Run `allowit policy kinds` for the four wallet kinds of the rail: `native`, `simple`, `standard` and `custom`.
+Pass the owner's choice to `policy generate --kind KIND`. Do not choose a kind for the owner.
 Use `exec` for the exact operation and retain its `--request-id`.
 After an uncertain result, read `status` or repeat the same intent with the same ID. Do not create replacement bytes or a new spending request to resolve uncertainty.
 A failed enclosing transaction does not prove that its retained authorization cannot execute elsewhere.
 Apply the selected rail's authorization and verified-receipt semantics before resubmission.
 Read verified native receipts before treating a payment as settled.
+A settled `exec` or `status` result shows the transaction, `height`, `fee` and `explorer` link. Report amounts with the unit that the result prints.
+A typed server refusal prints `error: CODE: MESSAGE`. Report the code; do not retry a refusal with exit 4.
 
 Owner signing remains with the owner. Use `wallet setup` and the `policy deploy`, `fund`, `activate` and `export` owner workflow; each step binds its exact public intent.

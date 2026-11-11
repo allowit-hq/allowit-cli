@@ -40,10 +40,10 @@ Examples:
 const EXIT_CODES: &str = "\
 Exit codes:
   0 ok, 1 internal error, 2 usage error, 3 configuration or not supported on
-  this rail, 4 rejected by the contract, 5 uncertain (retry with the same ID),
-  6 replayed, 7 network unavailable (retry with the same ID), 10 owner
-  signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
-  policy, 130 interrupted";
+  this rail, 4 rejected by the contract or refused by the server, 5 uncertain
+  (retry with the same ID), 6 replayed, 7 network unavailable (retry with the
+  same ID), 10 owner signature needed, 11 waiting for owner input, 12 pending,
+  20 denied by the policy, 130 interrupted";
 
 /// Flags that every command accepts.
 #[derive(Args, Clone, Debug, Default)]
@@ -182,9 +182,25 @@ pub(crate) fn parse_wait(s: &str) -> std::result::Result<Duration, String> {
 pub(crate) fn command() -> clap::Command {
     fn layout(cmd: clap::Command) -> clap::Command {
         let groups = cmd.get_subcommands().count() > 0;
-        let template = match cmd.get_before_help() {
-            Some(examples) => examples_template(&examples.to_string()),
-            None => TEMPLATE.to_owned(),
+        let examples = cmd.get_before_help().map(ToString::to_string);
+        // `policy generate` explains every wallet kind with the SDK's text.
+        // The section is literal template text, as the examples are: clap
+        // never wraps it, so each explanation stays one line. This runs in
+        // the tree walk, which keeps the order of the commands.
+        let kinds = examples.as_deref() == Some(policy::GENERATE_EXAMPLES);
+        let template = match (&examples, kinds) {
+            (Some(examples), true) => format!(
+                "{}\n\n{}\n",
+                examples_template(examples),
+                crate::kinds::help_section()
+            ),
+            (Some(examples), false) => examples_template(examples),
+            (None, _) => TEMPLATE.to_owned(),
+        };
+        let cmd = if kinds {
+            cmd.mut_arg("kind", |kind| kind.help(crate::kinds::flag_help()))
+        } else {
+            cmd
         };
         let cmd = cmd.help_template(template).mut_subcommands(layout);
         // A bare group prints its help and changes nothing.

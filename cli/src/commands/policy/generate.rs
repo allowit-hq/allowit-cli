@@ -2,44 +2,12 @@
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
+    kinds::{self, WalletKind},
     owner,
 };
 use allowit_sdk::generation::{self, GenerateRequest, Target};
 
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --kind common --new-wallet 'Pay only my approved recipient'";
-
-/// The policy kind an owner asks for. The server advertises one wallet
-/// profile per custody: Simple and Common share the policy-wallet profile, and
-/// the server chooses between them from the rules of the draft.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum Kind {
-    /// Rules on the owner's own account; no wallet contract
-    Native,
-    /// Policy wallet with rules that the server checks
-    Simple,
-    /// Policy wallet with canonical rules that the wallet also enforces
-    Common,
-    /// Policy wallet that runs the complete compiled policy
-    Custom,
-}
-impl Kind {
-    /// The server's wallet profile for this kind.
-    fn profile(self) -> &'static str {
-        match self {
-            Self::Native => "allowit-native-v1",
-            Self::Simple | Self::Common => "allowit-policy-wallet-v1",
-            Self::Custom => "allowit-custom-wallet-v1",
-        }
-    }
-    fn name(self) -> &'static str {
-        match self {
-            Self::Native => "native",
-            Self::Simple => "simple",
-            Self::Common => "common",
-            Self::Custom => "custom",
-        }
-    }
-}
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy kinds\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --kind standard --new-wallet 'Pay only my approved recipient'";
 
 /// Generate a portable draft through the owner-authenticated server; does not deploy or spend
 #[derive(clap::Args, Debug)]
@@ -53,9 +21,10 @@ pub(crate) struct Args {
     /// Configured sign-in Origin, which can differ from ALLOWIT_URL
     #[arg(long, env = "ALLOWIT_OWNER_ORIGIN", hide_env_values = true)]
     pub origin: String,
-    /// Policy kind; the server chooses Simple or Common from the draft's rules
-    #[arg(long, value_enum, value_name = "KIND")]
-    pub kind: Kind,
+    // The command tree replaces this help with the SDK's kinds.
+    /// Wallet kind
+    #[arg(long, value_name = "KIND", value_parser = kinds::parse)]
+    pub kind: WalletKind,
     /// Explicitly create a draft from an advertised wallet template
     #[arg(long)]
     pub new_wallet: bool,
@@ -70,10 +39,12 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         ));
     }
     let rail = cx.rail()?;
+    // The rail decides which kinds it supports and which profile installs each.
+    kinds::require(rail.id, args.kind)?;
     let request = GenerateRequest {
         prompt: args.prompt,
         network: rail.id.into(),
-        profile: args.kind.profile().into(),
+        profile: kinds::profile(rail.id, args.kind)?.into(),
         target: if args.new_wallet {
             Target::NewWallet
         } else {
@@ -85,33 +56,77 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     };
     // Input checks come before any key or network access.
     request.validate()?;
+    let server = cx.server_url()?;
     let signer = owner::signer(cx, &args.owner_key)?;
-    let draft = generation::generate(
-        &crate::config::env_value("ALLOWIT_URL"),
-        &args.origin,
-        &signer,
-        &request,
-        owner::clock,
-    )?;
-    // Simple and Common share one profile, so report a different server choice.
-    if let Some(tier) = draft_tier(&draft.document)
-        && matches!(args.kind, Kind::Simple | Kind::Common)
-        && tier != args.kind.name()
-    {
-        cx.out.warning(format!(
-            "the server generated a {tier} policy from the draft's rules, not {}",
-            args.kind.name()
-        ));
-    }
+    crate::flush_stderr(&mut cx.out.stderr);
+    let draft = generation::generate(&server, &args.origin, &signer, &request, owner::clock)?;
+    check_bound(cx, args.kind, &draft.document)?;
     let code = if draft.unresolved.is_empty() { 0 } else { 11 };
     cx.out.value(&draft.document);
     Ok(code)
 }
 
-/// The tier that the server bound to a generated draft, when it names one.
-fn draft_tier(document: &serde_json::Value) -> Option<&str> {
-    document
-        .pointer("/policy/runtime/instanceBinding/tier")
-        .or_else(|| document.pointer("/runtime/instanceBinding/tier"))
-        .and_then(serde_json::Value::as_str)
+/// Compares the kind that the server bound to the draft with the selection.
+/// A draft of another kind is never printed as the result; it stays in the
+/// owner workspace on the server. The bound kind is
+/// the draft's top-level `walletKind`; a draft without it gets a warning,
+/// because the CLI cannot confirm the selection.
+fn check_bound(cx: &mut Ctx, selected: WalletKind, draft: &serde_json::Value) -> Result<()> {
+    match kinds::bound(draft)? {
+        Some(bound) if bound == selected => Ok(()),
+        Some(bound) => Err(Error::unsupported(format!(
+            "The server bound wallet kind {bound} to the draft, not the selected {selected}; the CLI did not print that draft"
+        ))),
+        None => {
+            cx.out.warning(format!(
+                "the draft does not report its wallet kind; confirm that it is {selected} before deployment"
+            ));
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{commands::Global, term::Out};
+    use serde_json::json;
+
+    fn cx() -> Ctx {
+        Ctx::new(Global::default(), Out::new(false, true, false, true))
+    }
+
+    #[test]
+    fn the_bound_kind_must_be_the_selected_kind() {
+        let mut cx = cx();
+        let draft = json!({"id": "policy-0001", "walletKind": "standard"});
+        check_bound(&mut cx, WalletKind::Standard, &draft).unwrap();
+        assert!(cx.out.stderr.is_empty());
+        let error = check_bound(&mut cx, WalletKind::Simple, &draft).unwrap_err();
+        assert_eq!(error.code, 3);
+        assert_eq!(
+            error.message,
+            "The server bound wallet kind standard to the draft, not the selected simple; the CLI did not print that draft"
+        );
+        assert_eq!(
+            check_bound(
+                &mut cx,
+                WalletKind::Simple,
+                &json!({"walletKind": "common"})
+            )
+            .unwrap_err()
+            .code,
+            5
+        );
+    }
+
+    #[test]
+    fn a_draft_without_a_kind_warns_and_keeps_the_result() {
+        let mut cx = cx();
+        check_bound(&mut cx, WalletKind::Simple, &json!({"id": "policy-0001"})).unwrap();
+        assert_eq!(
+            cx.out.stderr,
+            "warning: the draft does not report its wallet kind; confirm that it is simple before deployment\n"
+        );
+    }
 }

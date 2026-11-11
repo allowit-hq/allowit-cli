@@ -59,7 +59,7 @@ pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
         rpc,
         root: cx.dir()?,
         signer,
-        backend: crate::config::env_value("ALLOWIT_URL"),
+        backend: cx.server_url()?,
         authority: cx.server_authority(rail)?,
     })
 }

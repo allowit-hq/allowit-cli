@@ -49,16 +49,18 @@ allowit policy show --source
 ```
 
 `check` validates the source structure and prints its SHA-256 digest, leading canonical rule calls, whether the source is canonical-only and whether it writes state.
-`build` type-checks the source through the embedded Core Python helper and exact portable Std library, then emits it. Python and rustc are required. Compilation has wall-time and output limits. Neither command authorizes a transaction or establishes settlement.
+`check --compile` also type-checks the source with rustc against the exact embedded portable Std library. Compilation has wall-time and output limits. Neither form authorizes a transaction or establishes settlement.
 The [policy template](../cli/templates/policy/) type-checks authored source as an ordinary Rust crate.
 
 ## Native binding
 
 The selected rail's vendor plugin derives the exact native request, effect and fee bounds, authorizers, simulation and settlement rules.
 Its wallet implementations bind source, code and owner configuration.
-Common uses the owner-approved leading canonical rule calls. Custom compiles the complete portable source.
-Simple requires full trusted host evaluation before the server authorizes execution.
-Simple and Common reject bespoke state writes.
+An owner selects one of four wallet kinds with `policy generate --kind`; `allowit policy kinds` lists them for the selected rail.
+Native and Simple enforce the policy offchain: the server evaluates the complete source before it authorizes execution. A keypair account holds Native funds, and a smart-contract wallet holds Simple funds.
+Standard enforces the owner-approved leading canonical rule calls onchain. These are the [standard wallet parameters](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters).
+Custom compiles the complete portable source into its own contract.
+Simple and Standard reject bespoke state writes.
 
 Classic custody requires a canonical-only policy because its current signing path has no compiled custom evaluator.
 Historical compiler-language packets remain readable for verification and status recovery.

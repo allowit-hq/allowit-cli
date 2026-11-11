@@ -43,7 +43,8 @@ allowit config show | path
 allowit wallet ls | show | use ADDR [--profile VERSION]
 allowit wallet import PROFILE_FILE
 allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID
-allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|common|custom (--new-wallet | --installation ID) PROMPT
+allowit policy kinds [--server]
+allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
 allowit policy check POLICY.rs [--compile]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
@@ -112,7 +113,7 @@ Select the network and import the owner key by name. Generation does not change 
 allowit rail use RAIL
 allowit keys import owner owner.key
 allowit --json policy generate --owner-key owner --origin http://localhost:5173 \
-  --kind common --new-wallet \
+  --kind standard --new-wallet \
   'Pay only my approved recipient'
 ```
 
@@ -120,8 +121,21 @@ The shared SDK client validates the exact sign-in message before requesting an o
 Its session stays in memory and is bound to that backend, Origin and owner account.
 `--new-wallet` requires an advertised contract-wallet template. To use an existing owner installation,
 replace it with `--installation ID` and that installation's kind. Selection never falls back between them.
-`--kind` selects the server's wallet profile: `native` uses the owner's own account, `simple` and `common` use a policy wallet, and `custom` uses a wallet that runs the complete compiled policy.
-Simple and Common share one profile. The server chooses between them from the draft's rules, and the CLI warns on stderr when the result differs from `--kind`.
+`--kind` selects one of four wallet kinds. The SDK describes them, and each rail lists the kinds that it supports:
+
+| Kind | Enforcement | Funds |
+| --- | --- | --- |
+| `native` | Allowit enforces the policy offchain | A keypair account |
+| `simple` | Allowit enforces the policy offchain, as for `native` | A smart-contract wallet |
+| `standard` | A smart-contract wallet enforces the standard policy onchain for the [supported params](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters) | The same wallet |
+| `custom` | A custom contract, built from the policy source, enforces the policy onchain | The same contract |
+
+`allowit policy kinds` prints each kind of the selected rail with its explanation, enforcement and custody, and for `standard` its supported params and their link.
+`allowit policy kinds --server` reads `GET /api/wallet-kinds` and prints the kinds that the `ALLOWIT_URL` server accepts on the rail. `--json` prints the list as an array.
+Kind ids are exact. A kind that the rail does not support exits 3 before any key or network access.
+The CLI selects the rail's wallet profile for the kind. A rail can install `simple` and `standard` through one profile.
+The draft's top-level `walletKind` names the kind that the server bound. The CLI does not print a draft of another kind (exit 3), and warns on stderr when a draft does not name its kind.
+A server refusal such as `wallet_kind_unsupported` prints the server's code and reason and exits 4.
 The complete prompt, selected network, profile and transfer operation go to the server.
 Generated source starts its rule sequence with `allowit::operations`, binding the permitted operation set.
 The [authoring contract](../docs/policy-reference.md#authoring-order) defines the order. UI renderers preserve it.
@@ -143,12 +157,24 @@ Use only commands and operations advertised by `rail show`.
 The CLI journals each operation before sending it. An uncertain result retains its request ID and exact bytes.
 Repeat the same `exec` or read `status`. A new request ID represents a new operation.
 Terminal status requires a verified receipt. A rotated agent key can recover an original receipt without a new operation signature.
+`--wait DUR` bounds status polling only. Prepare and submit are not bounded.
+
+`exec` and `status` print the receipt of a settled request: the transaction hash, the `height` of its block or ledger,
+the network `fee`, the moved `amount`, and the rail's `explorer` link when it has one.
+When the result carries them, the receipt also shows `feeCharged`, the fee that counted against the spending limits,
+and one row for each spending limit with its `limit`, `spent` and `remaining` amounts. `spent` includes fees.
+Every amount is a quantity `{units, asset, text}`. Text output prints `text`, which carries the asset's real unit.
+`wallet show` and `policy show` include `walletKind`, the kind that the profile binds.
+They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
 Original journal recovery does not require a new profile cache, current source approval or a new authority pin.
 It queries the configured settlement service for the original packet and verifies its receipt. It never prepares another payment.
 
 ## Output and exits
 
-Data goes to stdout. Diagnostics and generated request IDs go to stderr.
+Data goes to stdout. Diagnostics, generated request IDs and the progress of long steps go to stderr.
+`-q` drops progress. With `--json`, progress is silent unless `-v` is set; each step is then one `{"progress":{"message":…}}` object on stderr.
+A typed server refusal keeps the server's code: text prints `error: CODE: MESSAGE`, and the JSON error has `api_code`.
+A command that needs the server exits 3 when `ALLOWIT_URL` is not set, and names the origin when `rail trust` has no key for it.
 Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables prompts and color and makes `--json` output compact.
 `--build-only` prints the unsigned request in the same format. Destructive commands need `--yes` without a terminal.
 
@@ -158,9 +184,10 @@ Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables p
 | 1 | Internal error |
 | 2 | Invalid command or input |
 | 3 | Configuration or unavailable capability |
-| 4 | Contract rejection |
+| 4 | Contract rejection or a typed server refusal |
 | 5 | Uncertain. Preserve the request ID |
 | 6 | Replayed result |
+| 7 | Network unavailable. Retry with the same request ID |
 | 10 | Owner signature needed |
 | 11 | Owner input needed |
 | 12 | Pending |

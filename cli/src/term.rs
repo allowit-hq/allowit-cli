@@ -210,6 +210,11 @@ impl Out {
 pub(crate) fn text(value: &Value) -> String {
     let mut rows = vec![];
     flatten(String::new(), value, &mut rows);
+    render(&rows)
+}
+
+/// `(key, text)` rows as aligned `key  value` lines; see [`text`].
+pub(crate) fn render(rows: &[(String, String)]) -> String {
     let width = rows
         .iter()
         .filter(|(_, v)| !v.contains('\n'))
@@ -223,9 +228,9 @@ pub(crate) fn text(value: &Value) -> String {
     };
     for (key, text) in rows {
         if key.is_empty() {
-            line(&text);
+            line(text);
         } else if text.contains('\n') {
-            line(&key);
+            line(key);
             for l in text.lines() {
                 line(format!("  {l}").trim_end());
             }
@@ -246,7 +251,7 @@ fn scalar(value: &Value) -> String {
 }
 
 /// Collects `(path, text)` rows for [`Out::text`].
-fn flatten(prefix: String, value: &Value, rows: &mut Vec<(String, String)>) {
+pub(crate) fn flatten(prefix: String, value: &Value, rows: &mut Vec<(String, String)>) {
     let join = |key: &str| {
         if prefix.is_empty() {
             key.to_owned()
