@@ -2,6 +2,7 @@ name: CLI
 on:
   pull_request:
     paths:
+      - ".github/actions/private-dependency/**"
       - "cli/**"
       - "scripts/**"
       - "docs/examples/**"
@@ -18,14 +19,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+      # No Rust cache in this job. This repository is public: a pull request from a fork can
+      # restore caches of the base branch, and a cache of ~/.cargo/git or target/ would hold
+      # private source and its build output.
+      - name: Fetch private and locked sources
+        uses: ./.github/actions/private-dependency
+        with:
+          repository: ${{ secrets.PRIVATE_DEPENDENCY_REPOSITORY }}
+          ssh-key: ${{ secrets[vars.PRIVATE_DEPENDENCY_KEY_SECRET] }}
       - run: cargo fmt --all --check
       - run: cargo test --locked -p allowit-cli
       - run: cargo test --locked -p allowit-policy-template
