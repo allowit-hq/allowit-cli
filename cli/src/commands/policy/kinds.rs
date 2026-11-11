@@ -88,7 +88,6 @@ struct Refusal {
 fn from_server(server: &str, network: &str) -> Result<Vec<Kind>> {
     let origin = crate::config::parse_origin(server)?;
     let url = format!("{origin}/api/wallet-kinds?network={network}");
-    let unavailable = || allowit_sdk::transport_failure::network_unavailable("Allowit server");
     let client = HttpClient::new(Options {
         timeout: Duration::from_secs(20),
         max_response_bytes: 1 << 16,
@@ -107,7 +106,7 @@ fn from_server(server: &str, network: &str) -> Result<Vec<Kind>> {
             },
             None,
         )
-        .map_err(|_| unavailable())?;
+        .map_err(|_| unavailable(None))?;
     if !(200..300).contains(&response.status) {
         return Err(refusal(response.status, &response.body));
     }
@@ -130,6 +129,17 @@ fn from_server(server: &str, network: &str) -> Result<Vec<Kind>> {
     Ok(listing.kinds)
 }
 
+/// The error of a listing that got no answer, or a 503: exit 7. A listing
+/// has no request ID, so the hint names only the retry.
+fn unavailable(status: Option<u16>) -> Error {
+    let mut error = Error::uncertain(
+        "The Allowit server did not answer the wallet-kind request; check ALLOWIT_URL and retry",
+    );
+    error.code = allowit_sdk::transport_failure::NETWORK_UNAVAILABLE;
+    error.status = status;
+    error
+}
+
 /// The error of a refused request: the server's stable code and bounded text
 /// when it sent a typed refusal, the HTTP status otherwise. A 503 without an
 /// answer worth keeping is a network failure, which a retry may repair.
@@ -145,9 +155,8 @@ fn refusal(status: u16, body: &[u8]) -> Error {
     let message = bounded(reply.and_then(|r| r.error), 300)
         .unwrap_or_else(|| "The wallet-kind request was refused".into());
     if status == 503 {
-        let mut error = allowit_sdk::transport_failure::network_unavailable("Allowit server");
+        let mut error = unavailable(Some(status));
         error.api_code = code;
-        error.status = Some(status);
         return error;
     }
     match code {

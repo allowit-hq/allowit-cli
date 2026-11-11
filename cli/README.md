@@ -171,7 +171,7 @@ It queries the configured settlement service for the original packet and verifie
 ## Output and exits
 
 Data goes to stdout. Diagnostics, generated request IDs and the progress of long steps go to stderr.
-`-q` drops progress. With `--json`, stderr holds JSON objects only: progress is silent unless `-v` is set, and then each step is one `{"progress":{"message":…}}` object.
+`-q` drops progress. With `--json`, progress is silent unless `-v` is set; each step is then one `{"progress":{"message":…}}` object on stderr.
 A typed server refusal keeps the server's code: text prints `error: CODE: MESSAGE`, and the JSON error has `api_code`.
 A command that needs the server exits 3 when `ALLOWIT_URL` is not set, and names the origin when `rail trust` has no key for it.
 Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables prompts and color and makes `--json` output compact.

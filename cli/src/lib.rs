@@ -138,9 +138,10 @@ fn execute(cli: commands::Cli) -> i32 {
 }
 
 /// One long provider step as a stderr line, or `None` when the flags keep
-/// stderr quiet. Text mode prints the step unless `-q` is set. With `--json`,
-/// stderr holds JSON objects only, so a step prints only with `-v`, as one
-/// `{"progress":{"message":…}}` object. Stdout never receives a step.
+/// stderr quiet. Text mode prints the step unless `-q` is set. With `--json`
+/// a step prints only with `-v`, as one `{"progress":{"message":…}}` object,
+/// so a reader of JSON errors and warnings meets no bare step text. Stdout
+/// never receives a step.
 fn progress_line(json: bool, quiet: bool, verbose: bool, step: &str) -> Option<String> {
     match (json, quiet, verbose) {
         (_, true, _) | (true, _, false) => None,
