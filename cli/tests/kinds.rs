@@ -135,19 +135,10 @@ fn a_missing_server_url_and_an_untrusted_server_have_their_own_errors() {
         sandbox.ok(&["keys", "generate", "owner"]);
         // No ALLOWIT_URL: the error names the variable, not server trust.
         for kind in wallet_kinds(net).unwrap() {
+            // A rail installs every kind that it advertises, so `--kind` is
+            // never refused as a usage error for a listed kind.
+            assert!(installed(net, kind.id), "{net}: {}", kind.id.id());
             let output = sandbox.run(&generate(net, kind.id.id()));
-            if !installed(net, kind.id) {
-                // The SDK refuses a kind that no wallet profile of the rail
-                // installs, before the server URL is read.
-                assert_eq!(code(&output), Some(2), "{}", stderr(&output));
-                assert!(
-                    stderr(&output).contains(&format!("{} wallet kind", kind.id.id())),
-                    "{}",
-                    stderr(&output)
-                );
-                assert!(output.stdout.is_empty());
-                continue;
-            }
             assert_eq!(code(&output), Some(3), "{}", stderr(&output));
             assert_eq!(
                 stderr(&output),
