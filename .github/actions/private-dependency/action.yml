@@ -1,0 +1,24 @@
+name: Private dependency access
+description: Load a read-only repository key and verify access before Cargo fetches dependencies.
+inputs:
+  repository:
+    description: Owner and repository of the private dependency
+    required: true
+  ssh-key:
+    description: Read-only deploy key for that repository
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.1
+      with:
+        ssh-private-key: ${{ inputs.ssh-key }}
+    - shell: bash
+      env:
+        DEPENDENCY_REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+        [[ "$DEPENDENCY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+        git config --global url."git@github.com:$DEPENDENCY_REPOSITORY".insteadOf "https://github.com/$DEPENDENCY_REPOSITORY"
+        git ls-remote --exit-code "git@github.com:$DEPENDENCY_REPOSITORY.git" HEAD
+        echo CARGO_NET_GIT_FETCH_WITH_CLI=true >> "$GITHUB_ENV"

@@ -2,6 +2,7 @@ name: CLI
 on:
   pull_request:
     paths:
+      - ".github/actions/private-dependency/**"
       - "cli/**"
       - "scripts/**"
       - "docs/examples/**"
@@ -19,6 +20,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/private-dependency
+        with:
+          repository: ${{ vars.PRIVATE_DEPENDENCY_REPOSITORY }}
+          ssh-key: ${{ secrets[vars.PRIVATE_DEPENDENCY_KEY_SECRET] }}
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt, clippy
