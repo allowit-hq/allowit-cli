@@ -47,7 +47,7 @@ Read [known issues](../../../known_issues.md) before using a profile workaround.
 `ALLOWIT_URL` selects the server origin. Public profiles contain no signing material.
 The selected key must match the profile before any request or signature.
 
-Use `wallet show` and `policy show --source` to inspect the binding. `walletKind` names the bound wallet kind.
+Use `wallet show` and `policy show --source` to inspect the binding. `walletKind` names the bound wallet kind. Params print in human units; `paramsDisplay` in JSON holds the same values.
 Run `allowit policy kinds` for the four wallet kinds of the rail: `native`, `simple`, `standard` and `custom`.
 Pass the owner's choice to `policy generate --kind KIND`. Do not choose a kind for the owner.
 Use `exec` for the exact operation and retain its `--request-id`.

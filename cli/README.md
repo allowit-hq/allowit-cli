@@ -165,6 +165,7 @@ When the result carries them, the receipt also shows `feeCharged`, the fee that 
 and one row for each spending limit with its `limit`, `spent` and `remaining` amounts. `spent` includes fees.
 Every amount is a quantity `{units, asset, text}`. Text output prints `text`, which carries the asset's real unit.
 `wallet show` and `policy show` include `walletKind`, the kind that the profile binds.
+They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
 Original journal recovery does not require a new profile cache, current source approval or a new authority pin.
 It queries the configured settlement service for the original packet and verifies its receipt. It never prepares another payment.
 

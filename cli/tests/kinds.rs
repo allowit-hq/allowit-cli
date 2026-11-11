@@ -351,3 +351,43 @@ fn policy_kinds_server_refuses_an_invalid_list_and_prints_typed_refusals() {
         assert_eq!(code(&output), Some(7), "{}", stderr(&output));
     });
 }
+
+#[test]
+fn wallet_show_prints_each_param_in_human_units_with_the_asset_unit() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let profile: Value = serde_json::from_slice(&rail.fixtures.public_profile).unwrap();
+        let sandbox = Sandbox::new("wallet-params");
+        common::public_profile_fixture(&sandbox, &profile, "http://127.0.0.1:1");
+        for command in ["wallet", "policy"] {
+            let shown = sandbox.json(&["--rail", net, command, "show"]);
+            let text = sandbox.ok(&["--rail", net, command, "show"]);
+            let stored = shown["params"].as_object().unwrap();
+            let Some(display) = shown["paramsDisplay"].as_array() else {
+                // A rail that does not know the asset prints the stored values.
+                continue;
+            };
+            // JSON keeps the stored values and adds one display entry per param.
+            assert_eq!(display.len(), stored.len());
+            for field in display {
+                let key = field["key"].as_str().unwrap();
+                let value = field["shown"].as_str().unwrap();
+                assert!(stored.contains_key(key), "{key}");
+                assert!(!field["label"].as_str().unwrap().is_empty());
+                // An amount carries the unit of the installed asset, never a placeholder.
+                if let Some(unit) = field["unit"].as_str() {
+                    assert_eq!(unit, shown["assetSymbol"]);
+                    assert!(value.ends_with(&format!(" {unit}")), "{value}");
+                    assert_ne!(unit, "UNIT");
+                }
+                // Text prints the display value in place of the stored one.
+                let row = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix(&format!("params.{key} ")))
+                    .unwrap_or_else(|| panic!("no params.{key} row in\n{text}"));
+                assert_eq!(row.trim(), value);
+                assert!(!text.contains(&format!("params.{key}.")), "{text}");
+            }
+        }
+    });
+}
