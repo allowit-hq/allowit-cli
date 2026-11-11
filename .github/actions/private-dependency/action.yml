@@ -1,29 +1,32 @@
 name: Private dependency access
-description: Load a read-only repository key and verify access before Cargo fetches dependencies.
+description: >-
+  Fetch locked Cargo sources, including the private dependency, with a read-only key that
+  exists in one step only. Later steps build from the fetched sources and hold no key.
 inputs:
   repository:
-    description: Owner and repository of the private dependency
-    required: true
+    description: Owner and name of the private dependency. Pass a secret, so the runner masks it.
+    required: false
+    default: ""
   ssh-key:
-    description: Read-only deploy key for that repository
-    required: true
+    description: Read-only deploy key for that repository. Pass a secret.
+    required: false
+    default: ""
+  manifest-path:
+    description: Cargo manifest whose locked sources this step fetches.
+    required: false
+    default: Cargo.toml
 runs:
   using: composite
   steps:
-    - uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.1
-      with:
-        ssh-private-key: ${{ inputs.ssh-key }}
-    - shell: bash
+    - name: Fetch private and locked sources with a step-scoped key
+      shell: bash
       env:
-        DEPENDENCY_REPOSITORY: ${{ inputs.repository }}
-      run: |
-        set -euo pipefail
-        [[ "$DEPENDENCY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-        git config --global url."git@github.com:$DEPENDENCY_REPOSITORY".insteadOf "https://github.com/$DEPENDENCY_REPOSITORY"
-        checkout=$(mktemp -d "$RUNNER_TEMP/private-dependency.XXXXXX")
-        trap 'rm -rf "$checkout"' EXIT
-        git -C "$checkout" init --quiet
-        git -C "$checkout" fetch --quiet --depth=1 "git@github.com:$DEPENDENCY_REPOSITORY.git" HEAD
-        git -C "$checkout" cat-file -e FETCH_HEAD:Cargo.toml
-        git -C "$checkout" rev-parse FETCH_HEAD
-        echo CARGO_NET_GIT_FETCH_WITH_CLI=true >> "$GITHUB_ENV"
+        PRIVATE_DEPENDENCY_REPOSITORY: ${{ inputs.repository }}
+        PRIVATE_DEPENDENCY_KEY: ${{ inputs.ssh-key }}
+        MANIFEST_PATH: ${{ inputs.manifest-path }}
+      run: bash "$GITHUB_ACTION_PATH/fetch.sh"
+    - name: Confirm that the key is gone
+      shell: bash
+      env:
+        PRIVATE_DEPENDENCY_REPOSITORY: ${{ inputs.repository }}
+      run: bash "$GITHUB_ACTION_PATH/confirm-key-removed.sh"
