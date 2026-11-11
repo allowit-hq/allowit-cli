@@ -183,8 +183,13 @@ fn finish(mut out: Out, result: error::Result<i32>) -> i32 {
 }
 
 /// Writes an error to stderr. A typed server refusal keeps the server's
-/// stable code: `api_code` in JSON, and before the message in text.
+/// stable code: `api_code` in JSON, and before the message in text. The
+/// `reason` of its details, such as why a wallet kind is refused, follows
+/// the message; the SDK bounds that text.
 fn render_error(out: &mut Out, e: &Error) {
+    let reason = e
+        .detail("reason")
+        .filter(|reason| !e.message.contains(reason));
     if out.json {
         let mut value = json!({"error":{
             "code": Exit::from_code(e.code).name(),
@@ -195,12 +200,18 @@ fn render_error(out: &mut Out, e: &Error) {
         if let Some(code) = &e.api_code {
             value["error"]["api_code"] = code.as_str().into();
         }
+        if let Some(reason) = reason {
+            value["error"]["reason"] = reason.into();
+        }
         out.stderr += &format!("{value}\n");
     } else {
         let label = out.error_label();
         match &e.api_code {
             Some(code) => out.stderr += &format!("{label} {code}: {}\n", e.message),
             None => out.stderr += &format!("{label} {}\n", e.message),
+        }
+        if let Some(reason) = reason {
+            out.stderr += &format!("reason: {reason}\n");
         }
     }
 }

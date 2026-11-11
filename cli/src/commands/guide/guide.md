@@ -59,6 +59,9 @@ allowit policy show
 ```
 
 Replace `WALLET` with the owner's public wallet address.
+`wallet show` prints each param in the unit of the installed asset. With the agent key selected, it also
+prints each spending limit with what the policy has spent, fees included, and what remains; a wallet
+without a request from this device reports no limits yet.
 Complete the selected adapter's configuration before reading or using its profile.
 Selecting an address does not import a profile or authorize spending.
 
@@ -73,6 +76,8 @@ Replace `DESTINATION` and `ASSET:5` with values accepted by the selected adapter
 Use only operations reported by `rail show`.
 The selected key must match the profile's agent before signing.
 `exec` prints a generated request ID on stderr when none was supplied.
+A settled request prints its transaction, block height, network fee, the fee that the limits count
+(`feeCharged`), the explorer link and one row per spending limit: limit, spent and remaining.
 After exit 5, retry only with the same `--request-id`, or read the result with `status`.
 `--wait` bounds status polling only; prepare and submit are not bounded.
 A settled result shows its transaction, height, fee and explorer link, with each amount in the asset's unit.
@@ -91,7 +96,10 @@ allowit --json policy generate --owner-key owner --origin http://localhost:5173 
 
 `--kind` is `native`, `simple`, `standard` or `custom`. `allowit policy kinds` explains each kind of the
 selected rail, and `allowit policy kinds --server` lists the kinds that the server accepts.
-The draft's `walletKind` names the kind that the server bound; the CLI refuses a draft of another kind.
+The command sends the kind to the server, which binds it or refuses it with a typed code and a `reason`.
+The draft's `walletKind` names the kind that the server bound; a draft of another kind exits 5.
+Text output starts with the bound kind and each param in the unit of the installed asset.
+`--json` prints the draft document; with `-v`, stderr also holds one `{"review":…}` object with the same facts.
 The sign-in Origin must be allowed by that backend.
 The owner key does not replace the selected agent key. `--new-wallet` requires an advertised template;
 `--installation ID` explicitly selects an existing owner installation instead.

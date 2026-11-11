@@ -195,10 +195,11 @@ impl Rail {
     /// binds, when the rail reports one, and its params as an owner reads
     /// them. Returns the JSON document and the document that text prints.
     ///
-    /// JSON keeps `params` as stored and adds `paramsDisplay`: one entry per
-    /// param with its label, its value in human units and, for an amount,
-    /// the unit of the installed asset. Text prints that value in place of
-    /// the stored one, so an amount never appears as bare base units.
+    /// JSON keeps `params` as stored and adds `paramsDisplay`: the SDK's
+    /// line of each param, with its label and its value in the unit of the
+    /// installed asset. Text prints that value in place of the stored one,
+    /// so an amount never appears as bare base units. A profile whose params
+    /// the rail cannot read prints the stored values, never a placeholder.
     fn inspect(
         &self,
         p: &allowit_sdk::profiles::Profile,
@@ -211,63 +212,44 @@ impl Rail {
             out[crate::kinds::KEY] = kind.id().into();
         }
         let mut text = out.clone();
-        if let Some(fields) = self.param_fields(p, &out) {
-            text["params"] = fields
-                .iter()
-                .map(|field| (field.key.clone(), field.shown.clone().into()))
+        if let Ok(lines) = allowit_sdk::kinds::profile_param_lines(p)
+            && !lines.is_empty()
+            && let Ok(display) = serde_json::to_value(&lines)
+        {
+            text["params"] = lines
+                .into_iter()
+                .map(|line| (line.key, line.value.into()))
                 .collect::<serde_json::Map<_, _>>()
                 .into();
-            out["paramsDisplay"] = fields
-                .iter()
-                .map(|field| {
-                    serde_json::json!({
-                        "key": field.key, "label": field.label,
-                        "shown": field.shown, "unit": field.unit,
-                    })
-                })
-                .collect::<Vec<_>>()
-                .into();
+            out["paramsDisplay"] = display;
         }
         Ok((out, text))
     }
-    /// The params of a profile in the order in which its source reads them,
-    /// through the SDK's param display. `None` when the profile has no
-    /// params or the rail does not know the installed asset: the stored
-    /// values then print unchanged, never with a placeholder unit.
-    fn param_fields(
+    /// The spending limits of the profile's wallet: what each limit allows,
+    /// what the policy has spent, fees included, and what remains. The read
+    /// needs the selected agent key and the trusted server, as `status` does;
+    /// without an agent key it is not attempted. `Ok(None)` means that the
+    /// rail holds no report for this wallet yet.
+    fn limits(
         &self,
-        p: &allowit_sdk::profiles::Profile,
-        inspected: &serde_json::Value,
-    ) -> Option<Vec<allowit_sdk::parameters::Field>> {
-        use allowit_sdk::parameters::{Asset, Parameters, fields, known_assets};
-        let params = inspected.get("params")?.as_object()?.clone();
-        if params.is_empty() {
+        cx: &mut Ctx,
+        wallet: Option<&str>,
+    ) -> Option<Result<Option<Vec<allowit_sdk::execution::LimitReport>>>> {
+        if !self.caps().verbs.contains(&"status")
+            || cx.settings().ok()?.rail(self.0.id).agent.is_none()
+        {
             return None;
         }
-        let description = p.description();
-        let known = known_assets(self.0.id).unwrap_or_default();
-        let asset = known
-            .iter()
-            .find(|asset| asset.address == description.asset)
-            .cloned()
-            .or_else(|| {
-                // The rail may know the asset by its identity alone.
-                let display =
-                    allowit_sdk::kinds::asset_display(self.0.id, &description.asset).ok()?;
-                Some(Asset {
-                    symbol: display.symbol,
-                    address: description.asset.clone(),
-                    decimals: display.decimals.into(),
-                })
-            })?;
-        let draft = Parameters {
-            params,
-            kinds: Default::default(),
-            asset,
-            known,
-            unresolved: vec![],
+        let mut read = || {
+            let authority = cx.server_authority(self.0)?;
+            let p = self.profile(cx, wallet)?.with_authority(&authority)?;
+            let signer = self.signer(cx)?;
+            let root = cx.dir()?;
+            let rpc = cx.rpc_url(self.0)?;
+            crate::flush_stderr(&mut cx.out.stderr);
+            allowit_sdk::execution::limits(p, signer, &root, rpc)
         };
-        Some(fields(&draft, &description.source))
+        Some(read())
     }
     fn show(cx: &mut Ctx, json: &serde_json::Value, text: &serde_json::Value) {
         if cx.out.json {
@@ -277,9 +259,34 @@ impl Rail {
         }
     }
     pub(crate) fn wallet_show(&self, cx: &mut Ctx, wallet: Option<&str>) -> Result<i32> {
+        use allowit_sdk::execution::Limits;
         let p = self.profile(cx, wallet)?;
-        let (json, text) = self.inspect(&p)?;
+        let (mut json, mut text) = self.inspect(&p)?;
+        let mut table = vec![];
+        match self.limits(cx, wallet) {
+            Some(Ok(Some(limits))) => {
+                json[Limits::KEY] = serde_json::to_value(&limits)
+                    .map_err(|_| Error::config("Cannot encode the spending limits"))?;
+                table = crate::receipt::limits_table(&limits);
+            }
+            // No report yet: say so, and never print a zero or an empty table.
+            Some(Ok(None)) => {
+                json[Limits::KEY] = serde_json::Value::Null;
+                text[Limits::KEY] =
+                    "not reported yet: this device holds no request of this wallet".into();
+            }
+            // The wallet is shown from the verified profile; the limits are a second read.
+            Some(Err(error)) => cx.out.warning(format!(
+                "the spending limits were not read: {}",
+                error.message
+            )),
+            None => {}
+        }
         Self::show(cx, &json, &text);
+        if !cx.out.json && !table.is_empty() {
+            cx.out.line("");
+            cx.out.table(&table);
+        }
         Ok(0)
     }
     pub(crate) fn policy_show(&self, cx: &mut Ctx, source: bool) -> Result<i32> {

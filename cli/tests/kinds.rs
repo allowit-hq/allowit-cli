@@ -26,6 +26,17 @@ fn generate<'a>(net: &'a str, kind: &'a str) -> [&'a str; 12] {
     ]
 }
 
+/// True when a wallet profile of the rail installs `kind`. The SDK serves a
+/// generation request for a kind only through such a profile.
+fn installed(net: &str, kind: WalletKind) -> bool {
+    allowit_sdk::plugins::for_network(net)
+        .unwrap()
+        .server()
+        .profiles()
+        .iter()
+        .any(|profile| profile.wallet_kind() == Some(kind))
+}
+
 #[test]
 fn policy_kinds_lists_the_kinds_of_the_rail_as_the_sdk_describes_them() {
     every_rail(|rail| {
@@ -125,6 +136,18 @@ fn a_missing_server_url_and_an_untrusted_server_have_their_own_errors() {
         // No ALLOWIT_URL: the error names the variable, not server trust.
         for kind in wallet_kinds(net).unwrap() {
             let output = sandbox.run(&generate(net, kind.id.id()));
+            if !installed(net, kind.id) {
+                // The SDK refuses a kind that no wallet profile of the rail
+                // installs, before the server URL is read.
+                assert_eq!(code(&output), Some(2), "{}", stderr(&output));
+                assert!(
+                    stderr(&output).contains(&format!("{} wallet kind", kind.id.id())),
+                    "{}",
+                    stderr(&output)
+                );
+                assert!(output.stdout.is_empty());
+                continue;
+            }
             assert_eq!(code(&output), Some(3), "{}", stderr(&output));
             assert_eq!(
                 stderr(&output),
@@ -161,10 +184,16 @@ fn a_missing_server_url_and_an_untrusted_server_have_their_own_errors() {
 fn a_typed_server_refusal_prints_the_server_code_and_reason() {
     every_rail(|rail| {
         let net = rail.network;
-        let Some(kind) = wallet_kinds(net).unwrap().first().map(|info| info.id) else {
+        let kinds = wallet_kinds(net).unwrap();
+        let Some(kind) = kinds
+            .iter()
+            .map(|info| info.id)
+            .find(|kind| installed(net, *kind))
+        else {
             return;
         };
-        let reason = format!("Wallet kind {kind} is not enabled on {net}");
+        let refused = format!("Wallet kind {kind} is not enabled on {net}");
+        let reason = "This server holds no reviewed wallet code for the kind";
         for json_mode in [false, true] {
             let mut sandbox = Sandbox::new("refusal");
             let mock = Mock::new();
@@ -173,7 +202,7 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
             sandbox.ok(&["keys", "generate", "owner"]);
             let listener = mock.listener;
             let body = json!({
-                "error": reason,
+                "error": refused,
                 "code": "wallet_kind_unsupported",
                 "details": {"walletKind": kind.id(), "network": net, "reason": reason},
             });
@@ -200,15 +229,18 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
                     error["error"]["message"]
                         .as_str()
                         .unwrap()
-                        .contains(&reason)
+                        .contains(&refused)
                 );
+                // The reason of the refusal details follows the message.
+                assert_eq!(error["error"]["reason"], reason);
             } else {
                 let text = stderr(&output);
                 assert!(
                     text.starts_with("error: wallet_kind_unsupported: "),
                     "{text}"
                 );
-                assert!(text.contains(&reason), "{text}");
+                assert!(text.contains(&refused), "{text}");
+                assert!(text.ends_with(&format!("\nreason: {reason}\n")), "{text}");
             }
         }
     });
@@ -371,15 +403,11 @@ fn wallet_show_prints_each_param_in_human_units_with_the_asset_unit() {
             assert_eq!(display.len(), stored.len());
             for field in display {
                 let key = field["key"].as_str().unwrap();
-                let value = field["shown"].as_str().unwrap();
+                let value = field["value"].as_str().unwrap();
                 assert!(stored.contains_key(key), "{key}");
                 assert!(!field["label"].as_str().unwrap().is_empty());
-                // An amount carries the unit of the installed asset, never a placeholder.
-                if let Some(unit) = field["unit"].as_str() {
-                    assert_eq!(unit, shown["assetSymbol"]);
-                    assert!(value.ends_with(&format!(" {unit}")), "{value}");
-                    assert_ne!(unit, "UNIT");
-                }
+                // No value carries a placeholder unit.
+                assert!(!value.contains("UNIT"), "{value}");
                 // Text prints the display value in place of the stored one.
                 let row = text
                     .lines()

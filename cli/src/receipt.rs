@@ -3,32 +3,22 @@
 //! its own unit text, from the SDK or the server; this file never names a unit.
 use crate::term::{self, Out};
 use allowit_sdk::{
-    execution::{Quantity, Settlement},
+    execution::{
+        EXPLORER_KEY as EXPLORER, FEE_CHARGED_KEY as FEE_CHARGED, LimitReport, Limits, Settlement,
+        explorer, fee_charged,
+    },
     runtime::owner::{LinkKind, explorer_link},
 };
-use serde::Deserialize;
 use serde_json::Value;
 
-/// The fee that counted against the spending limits, in the installed asset.
-const FEE_CHARGED: &str = "feeCharged";
-const LIMITS: &str = "limits";
-const EXPLORER: &str = "explorer";
 const TRANSACTION: &str = "transactionHash";
 
-/// One spending limit of the installed policy. `spent` includes the fees.
-#[derive(Deserialize)]
-struct Limit {
-    param: String,
-    limit: Quantity,
-    spent: Quantity,
-    remaining: Quantity,
-}
-
 /// The document with the rail's explorer link for its transaction, when the
-/// rail has an explorer and the document names a transaction.
+/// document does not carry one, the rail has an explorer and the document
+/// names a transaction.
 fn with_explorer(network: &str, mut document: Value) -> Value {
     if document.is_object()
-        && document.get(EXPLORER).is_none()
+        && explorer(&document).is_none()
         && let Some(hash) = document
             .get(TRANSACTION)
             .and_then(Value::as_str)
@@ -65,12 +55,9 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<Vec<String>>) {
         return (rows, vec![]);
     };
     let settlement = Settlement::of(document);
-    let charged: Option<Quantity> = map
-        .get(FEE_CHARGED)
-        .and_then(|value| serde_json::from_value(value.clone()).ok());
-    let limits: Option<Vec<Limit>> = map
-        .get(LIMITS)
-        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    // The SDK reads the fee that the limits count and each limit report.
+    let charged = fee_charged(document);
+    let limits = Limits::of(document);
     let mut rows = vec![];
     // The request first, then what settled, then every other field.
     let leading = ["requestId", "status", TRANSACTION];
@@ -93,34 +80,40 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<Vec<String>>) {
         let shown = leading.contains(&key.as_str())
             || (key == Settlement::KEY && settlement.is_some())
             || (key == FEE_CHARGED && charged.is_some())
-            || (key == LIMITS && limits.is_some());
+            || (key == Limits::KEY && limits.is_some());
         if !shown {
             term::flatten(key.clone(), value, &mut rows);
         }
     }
+    (rows, limits_table(&limits.unwrap_or_default()))
+}
+
+/// The table of spending limits, header first; empty without a limit.
+/// `spent` includes the fees that the limits count.
+pub(crate) fn limits_table(limits: &[LimitReport]) -> Vec<Vec<String>> {
     let mut table = vec![];
-    if let Some(limits) = limits.filter(|limits| !limits.is_empty()) {
+    if !limits.is_empty() {
         table.push(
             ["param", "limit", "spent", "remaining"]
                 .map(String::from)
                 .to_vec(),
         );
-        for limit in limits {
-            table.push(vec![
-                limit.param,
-                limit.limit.text,
-                limit.spent.text,
-                limit.remaining.text,
-            ]);
-        }
     }
-    (rows, table)
+    for limit in limits {
+        table.push(vec![
+            limit.param.clone(),
+            limit.limit.text.clone(),
+            limit.spent.text.clone(),
+            limit.remaining.text.clone(),
+        ]);
+    }
+    table
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use allowit_sdk::kinds::AssetDisplay;
+    use allowit_sdk::{execution::Quantity, kinds::AssetDisplay};
     use serde_json::json;
 
     fn asset() -> AssetDisplay {
