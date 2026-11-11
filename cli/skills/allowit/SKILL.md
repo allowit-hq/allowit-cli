@@ -56,6 +56,9 @@ A failed enclosing transaction does not prove that its retained authorization ca
 Apply the selected rail's authorization and verified-receipt semantics before resubmission.
 Read verified native receipts before treating a payment as settled.
 A settled `exec` or `status` result shows the transaction, `height`, `fee` and `explorer` link. Report amounts with the unit that the result prints.
+A limit for each payment has no counter: it prints `-` for spent and remaining, and JSON lists it under `uncountedLimits`.
+`policy deploy` and `policy fund` print the hash, ledger, status and explorer link of each owner transaction.
+Record `allowit --version` with a run: it names the git revision that built the binary.
 A typed server refusal prints `error: CODE: MESSAGE`. Report the code; do not retry a refusal with exit 4.
 
 Owner signing remains with the owner. Use `wallet setup` and the `policy deploy`, `fund`, `activate` and `export` owner workflow; each step binds its exact public intent.

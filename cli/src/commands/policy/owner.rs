@@ -97,6 +97,7 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     let draft = read_input(&a.policy_file)?;
     let executable = read_input(&a.executable)?;
     cx.confirm("Deploy this exact policy wallet using the owner account")?;
+    let network = cx.rail()?.id;
     let out = shared::deploy(
         &local.context(&a.session.origin),
         shared::Deploy {
@@ -108,7 +109,7 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
             fee_limit: &a.fee_limit,
         },
     )?;
-    cx.out.value(&out);
+    crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(0)
 }
 pub(crate) fn fund(a: Fund, cx: &mut Ctx) -> Result<i32> {
@@ -116,13 +117,15 @@ pub(crate) fn fund(a: Fund, cx: &mut Ctx) -> Result<i32> {
     let local = owner::load(cx, &a.session.owner_key)?;
     let document = read_input(&a.policy_file)?;
     cx.confirm("Transfer this amount from the owner to the selected wallet")?;
-    cx.out.value(&shared::fund(
+    let network = cx.rail()?.id;
+    let out = shared::fund(
         &local.context(&a.session.origin),
         &document,
         &a.session.request_id,
         &a.amount,
         &a.fee_limit,
-    )?);
+    )?;
+    crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(0)
 }
 pub(crate) fn activate(a: Activate, cx: &mut Ctx) -> Result<i32> {
@@ -171,6 +174,7 @@ pub(crate) fn status(a: Status, cx: &mut Ctx) -> Result<i32> {
     } else {
         5
     };
-    cx.out.value(&out);
+    let network = cx.rail()?.id;
+    crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(code)
 }

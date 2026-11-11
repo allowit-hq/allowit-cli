@@ -20,7 +20,7 @@ Commands:
   history     List recent requests from the local journal
   completion  Print a shell completion script
   guide       Print the agent guide: the commands in the order an agent uses them
-  version     Print the version
+  version     Print the version and the git revision of the build
   help        Print this message or the help of the given subcommand(s)
 
 Options:

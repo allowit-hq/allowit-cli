@@ -62,6 +62,7 @@ Replace `WALLET` with the owner's public wallet address.
 `wallet show` prints each param in the unit of the installed asset. With the agent key selected, it also
 prints each spending limit with what the policy has spent, fees included, and what remains; a wallet
 without a request from this device reports no limits yet.
+A limit for each payment has no counter: its row shows `-` for spent and remaining.
 Complete the selected adapter's configuration before reading or using its profile.
 Selecting an address does not import a profile or authorize spending.
 
@@ -80,6 +81,7 @@ A settled request prints its transaction, block height, network fee, the fee tha
 (`feeCharged`), the explorer link and one row per spending limit: limit, spent and remaining.
 After exit 5, retry only with the same `--request-id`, or read the result with `status`.
 `--wait` bounds status polling only; prepare and submit are not bounded.
+A request that the server cannot resolve yet is read again until the wait ends; then the command exits 5 with the server's message.
 A settled result shows its transaction, height, fee and explorer link, with each amount in the asset's unit.
 When the result carries them, it also shows the charged fee and each spending limit: limit, spent and remaining.
 `history` lists local requests.

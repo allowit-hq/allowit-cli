@@ -386,12 +386,43 @@ fn help_falls_back_for_unreadable_or_invalid_config_without_repairing_it() {
 fn version_reports_this_cli_release() {
     let sandbox = common::Sandbox::new("version");
     let expected = env!("CARGO_PKG_VERSION");
-    assert_eq!(sandbox.ok(&["version"]), format!("allowit {expected}\n"));
-    assert_eq!(sandbox.ok(&["--version"]), format!("allowit {expected}\n"));
+    let revision = allowit_cli::REVISION;
+    let line = format!("allowit {expected} ({revision})\n");
+    assert_eq!(sandbox.ok(&["version"]), line);
+    assert_eq!(sandbox.ok(&["--version"]), line);
     assert_eq!(
         sandbox.json(&["version"]),
-        serde_json::json!({ "version": expected })
+        serde_json::json!({ "version": expected, "revision": revision })
     );
+}
+
+/// The revision proves the source of the binary: the short hash of the
+/// commit, with `-dirty` when the tree differed from it. It is never empty.
+#[test]
+fn version_names_the_git_revision_of_the_build() {
+    let revision = allowit_cli::REVISION;
+    let hash = revision.strip_suffix("-dirty").unwrap_or(revision);
+    // One word: a commit hash, `unknown` or the text of ALLOWIT_BUILD_REVISION.
+    let word = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-');
+    assert!(!hash.is_empty() && hash.bytes().all(word), "{revision}");
+    let commit = hash.len() >= 12 && hash.bytes().all(|b| b.is_ascii_hexdigit());
+    // This test binary and the command come from one checkout, so git
+    // reports the commit that the build recorded.
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8(output.stdout).unwrap().trim().to_owned())
+    };
+    if commit
+        && std::env::var_os("ALLOWIT_BUILD_REVISION").is_none()
+        && let Some(head) = git(&["rev-parse", "--short=12", "HEAD"])
+    {
+        assert_eq!(hash, head);
+    }
 }
 
 /// `exec --help` names exactly the operations that `rail show` reports for

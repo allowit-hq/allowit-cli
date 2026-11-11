@@ -72,6 +72,10 @@ allowit rail ls --json
 allowit rail show RAIL --json
 ```
 
+`allowit version` and `allowit --version` print the release and the git revision that built the binary, as in `allowit 0.4.0 (d27da80d9671)`.
+The revision is the short commit hash. It ends in `-dirty` when the working tree differed from that commit.
+A build without a git checkout reads `ALLOWIT_BUILD_REVISION`, or reports `unknown`. `--json` prints `version` and `revision`.
+
 Use the installed build's output instead of a copied rail list.
 `rail ls` reports identifiers, aliases, family, Testnet status and the current selection.
 `rail show` reports supported operations, available/unavailable commands, signing curve, asset metadata and local selections.
@@ -158,11 +162,15 @@ The CLI journals each operation before sending it. An uncertain result retains i
 Repeat the same `exec` or read `status`. A new request ID represents a new operation.
 Terminal status requires a verified receipt. A rotated agent key can recover an original receipt without a new operation signature.
 `--wait DUR` bounds status polling only. Prepare and submit are not bounded.
+When the server cannot resolve a request in one status read, the CLI reads the status again until the wait ends.
+If the request is still unresolved then, the command prints the server's message and exits 5. Read the same request ID again with `status`.
 
 `exec` and `status` print the receipt of a settled request: the transaction hash, the `height` of its block or ledger,
 the network `fee`, the moved `amount`, and the rail's `explorer` link when it has one.
 When the result carries them, the receipt also shows `feeCharged`, the fee that counted against the spending limits,
 and one row for each spending limit with its `limit`, `spent` and `remaining` amounts. `spent` includes fees.
+A limit for each payment, `payment_limit`, has no counter. `exec`, `status` and `wallet show` print it in the same table with `-` for `spent` and `remaining`.
+JSON lists it under `uncountedLimits` as `{param, limit}`; `limits` holds only the limits that the rail counts.
 Every amount is a quantity `{units, asset, text}`. Text output prints `text`, which carries the asset's real unit.
 `wallet show` and `policy show` include `walletKind`, the kind that the profile binds.
 They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
@@ -223,6 +231,8 @@ For account policies, configure native roles with `wallet setup` before activati
 The selected capability validates addresses, fee units, executable format and native signing intent.
 Use each command’s `--help` for its required files and flags.
 `policy owner-status ID` reads original owner receipts without the owner key or a new signature.
+`policy deploy`, `policy fund` and `policy owner-status` print each owner transaction: its `action`, `transactionHash`, `ledger`, `status` and the rail's `explorer` link.
+With `--json`, `policy deploy` and `policy fund` keep the document that the next owner command reads and list these facts under `receipts`.
 
 Public profile versions are immutable. A new export does not replace a profile retained for historical status.
 If several profiles match, use `wallet use ADDRESS --profile VERSION` to select one explicitly.
