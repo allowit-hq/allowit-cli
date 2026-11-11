@@ -20,5 +20,10 @@ runs:
         set -euo pipefail
         [[ "$DEPENDENCY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
         git config --global url."git@github.com:$DEPENDENCY_REPOSITORY".insteadOf "https://github.com/$DEPENDENCY_REPOSITORY"
-        git ls-remote --exit-code "git@github.com:$DEPENDENCY_REPOSITORY.git" HEAD
+        checkout=$(mktemp -d "$RUNNER_TEMP/private-dependency.XXXXXX")
+        trap 'rm -rf "$checkout"' EXIT
+        git -C "$checkout" init --quiet
+        git -C "$checkout" fetch --quiet --depth=1 "git@github.com:$DEPENDENCY_REPOSITORY.git" HEAD
+        git -C "$checkout" cat-file -e FETCH_HEAD:Cargo.toml
+        git -C "$checkout" rev-parse FETCH_HEAD
         echo CARGO_NET_GIT_FETCH_WITH_CLI=true >> "$GITHUB_ENV"
