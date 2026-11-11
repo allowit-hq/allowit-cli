@@ -251,6 +251,34 @@ impl Rail {
         };
         Some(read())
     }
+    /// The param lines of a profile, from the SDK: the source of the limits
+    /// that have no counter. A profile whose params the rail cannot read has
+    /// none.
+    fn param_lines(p: &allowit_sdk::profiles::Profile) -> Vec<allowit_sdk::kinds::ParamLine> {
+        allowit_sdk::kinds::profile_param_lines(p).unwrap_or_default()
+    }
+    /// The param lines of the installed profile of a retained request, which
+    /// carries no profile of its own. They are shown only when that profile
+    /// still names the policy that sent the request.
+    fn retained_param_lines(
+        &self,
+        cx: &mut Ctx,
+        binding: &Binding,
+    ) -> Vec<allowit_sdk::kinds::ParamLine> {
+        let Ok(p) = self.profile(cx, binding.wallet.as_deref()) else {
+            return vec![];
+        };
+        let policy = format!(
+            "{}@{}",
+            p.description().policy_id,
+            p.description().module_digest
+        );
+        if binding.policy.as_deref() == Some(policy.as_str()) {
+            Self::param_lines(&p)
+        } else {
+            vec![]
+        }
+    }
     fn show(cx: &mut Ctx, json: &serde_json::Value, text: &serde_json::Value) {
         if cx.out.json {
             cx.out.json_value(json);
@@ -259,15 +287,19 @@ impl Rail {
         }
     }
     pub(crate) fn wallet_show(&self, cx: &mut Ctx, wallet: Option<&str>) -> Result<i32> {
+        use crate::receipt::{UNCOUNTED_LIMITS, limits_table, uncounted_limits};
         use allowit_sdk::execution::Limits;
         let p = self.profile(cx, wallet)?;
         let (mut json, mut text) = self.inspect(&p)?;
-        let mut table = vec![];
+        let lines = Self::param_lines(&p);
+        // A limit without a counter comes from the verified profile, so it
+        // shows with or without a report of the counted limits.
+        let mut reported = vec![];
         match self.limits(cx, wallet) {
             Some(Ok(Some(limits))) => {
                 json[Limits::KEY] = serde_json::to_value(&limits)
                     .map_err(|_| Error::config("Cannot encode the spending limits"))?;
-                table = crate::receipt::limits_table(&limits);
+                reported = limits;
             }
             // No report yet: say so, and never print a zero or an empty table.
             Some(Ok(None)) => {
@@ -282,6 +314,12 @@ impl Rail {
             )),
             None => {}
         }
+        let uncounted = uncounted_limits(&lines, &reported);
+        if !uncounted.is_empty() {
+            json[UNCOUNTED_LIMITS] = serde_json::to_value(&uncounted)
+                .map_err(|_| Error::config("Cannot encode the limits"))?;
+        }
+        let table = limits_table(&reported, &uncounted);
         Self::show(cx, &json, &text);
         if !cx.out.json && !table.is_empty() {
             cx.out.line("");
@@ -323,6 +361,14 @@ impl Rail {
             // serves only a record without one, so it may be unset here.
             let server = env_value("ALLOWIT_URL");
             let signer = self.signer(cx)?;
+            let lines = self.retained_param_lines(
+                cx,
+                &Binding {
+                    wallet: binding.wallet,
+                    policy: binding.policy,
+                    ..Default::default()
+                },
+            );
             crate::flush_stderr(&mut cx.out.stderr);
             let out = allowit_sdk::execution::recover(
                 recovery,
@@ -333,7 +379,7 @@ impl Rail {
                 r.wait,
                 Some(r),
             )?;
-            crate::receipt::show(&mut cx.out, self.0.id, out.document);
+            crate::receipt::show(&mut cx.out, self.0.id, out.document, &lines);
             return Ok(crate::exit::execution_status(out.status).code());
         }
         let p = binding.profile.ok_or_else(|| {
@@ -350,9 +396,10 @@ impl Rail {
             return Ok(0);
         }
         let signer = self.signer(cx)?;
+        let lines = Self::param_lines(&p);
         crate::flush_stderr(&mut cx.out.stderr);
         let out = allowit_sdk::execution::execute(p, signer, &root, rpc, r)?;
-        crate::receipt::show(&mut cx.out, self.0.id, out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document, &lines);
         Ok(crate::exit::execution_status(out.status).code())
     }
     pub(crate) fn status(
@@ -365,6 +412,10 @@ impl Rail {
     ) -> Result<i32> {
         let signer = self.signer(cx)?;
         let root = cx.dir()?;
+        let lines = match &binding.profile {
+            Some(p) => Self::param_lines(p),
+            None => self.retained_param_lines(cx, &binding),
+        };
         let out = if let Some(recovery) = binding.recovery {
             // The journal's origin serves a retained request. ALLOWIT_URL is
             // the fallback for a record without one, and may be unset.
@@ -382,7 +433,7 @@ impl Rail {
             crate::flush_stderr(&mut cx.out.stderr);
             allowit_sdk::execution::status(p, signer, &root, rpc, id, wait)?
         };
-        crate::receipt::show(&mut cx.out, self.0.id, out.document);
+        crate::receipt::show(&mut cx.out, self.0.id, out.document, &lines);
         Ok(crate::exit::execution_status(out.status).code())
     }
 }

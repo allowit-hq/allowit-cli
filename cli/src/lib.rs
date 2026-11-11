@@ -4,6 +4,17 @@
 pub use allowit_sdk::{error, wallet};
 /// This CLI's own release version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The git revision that built this binary: the short commit hash, with
+/// `-dirty` when the working tree differed from that commit, or `unknown`.
+/// The build script records it.
+pub const REVISION: &str = env!("ALLOWIT_BUILD_REVISION");
+/// What `--version` prints after the name: the release and the revision.
+pub(crate) const VERSION_LINE: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("ALLOWIT_BUILD_REVISION"),
+    ")"
+);
 pub(crate) use allowit_sdk::{config, output, request};
 mod commands;
 mod ctx;

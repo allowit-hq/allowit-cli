@@ -13,7 +13,7 @@ mod status;
 mod version;
 mod wallet;
 
-use crate::{VERSION, ctx::Ctx, error::Result};
+use crate::{VERSION_LINE, ctx::Ctx, error::Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::{path::PathBuf, time::Duration};
 
@@ -108,7 +108,7 @@ pub(crate) struct Global {
 #[command(
     name = "allowit",
     about = "AllowIt: policy wallets for agents. Go on. On your terms.",
-    version = VERSION,
+    version = VERSION_LINE,
     before_help = ROOT_EXAMPLES,
     after_help = EXIT_CODES,
     disable_version_flag = false
