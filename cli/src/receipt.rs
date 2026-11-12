@@ -5,13 +5,11 @@
 use crate::term::{self, Out};
 use allowit_sdk::{
     execution::{
-        EXPLORER_KEY as EXPLORER, FEE_CHARGED_KEY as FEE_CHARGED, LimitReport, Limits, Settlement,
-        explorer, fee_charged,
+        EXPLORER_KEY as EXPLORER, FEE_CHARGED_KEY as FEE_CHARGED, LimitReport, Limits,
+        PaymentLimit, Settlement, WalletLimits, explorer, fee_charged,
     },
-    kinds::ParamLine,
     runtime::owner::{LinkKind, explorer_link},
 };
-use serde::Serialize;
 use serde_json::Value;
 
 const TRANSACTION: &str = "transactionHash";
@@ -20,37 +18,12 @@ const RECEIPTS: &str = "receipts";
 /// The key of the transactions in an owner workflow document: hashes, or
 /// one object for each transaction.
 const TRANSACTIONS: &str = "transactions";
-/// The key of the limits that have no counter in a JSON result.
-pub(crate) const UNCOUNTED_LIMITS: &str = "uncountedLimits";
-/// The canonical params that limit each payment. The policy checks such a
-/// limit against one request, so it has no spent or remaining amount.
-const PER_PAYMENT: &[&str] = &["payment_limit"];
-
-/// A limit of the installed policy that has no counter, such as the limit
-/// of each payment: what it allows, as the SDK prints the param.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(crate) struct UncountedLimit {
-    pub param: String,
-    pub limit: String,
-}
-
-/// The limits without a counter among the param lines of a profile. A
-/// limit that the rail reports with counters is not repeated.
-pub(crate) fn uncounted_limits(
-    lines: &[ParamLine],
-    reported: &[LimitReport],
-) -> Vec<UncountedLimit> {
-    lines
+/// The per-payment limits to print beside `reported`. A limit that the rail
+/// reports with counters is not repeated.
+fn uncounted<'a>(payment: &'a [PaymentLimit], reported: &[LimitReport]) -> Vec<&'a PaymentLimit> {
+    payment
         .iter()
-        .filter(|line| {
-            PER_PAYMENT.contains(&line.key.as_str())
-                && !line.value.is_empty()
-                && !reported.iter().any(|report| report.param == line.key)
-        })
-        .map(|line| UncountedLimit {
-            param: line.key.clone(),
-            limit: line.value.clone(),
-        })
+        .filter(|limit| !reported.iter().any(|report| report.param == limit.param))
         .collect()
 }
 
@@ -73,23 +46,25 @@ fn with_explorer(network: &str, mut document: Value) -> Value {
 
 /// Prints an `exec` or `status` result. JSON keeps the document and adds
 /// `explorer`; text prints the same facts as `key  value` rows and one
-/// table of limits. `params` are the param lines of the installed profile,
-/// when the caller holds it: a limit without a counter comes from them. JSON
-/// lists it under `uncountedLimits`, and the table shows it without a spent
-/// or remaining amount.
-pub(crate) fn show(out: &mut Out, network: &str, document: Value, params: &[ParamLine]) {
+/// table of limits. `payment` holds the per-payment limits of the installed
+/// profile, when the caller holds it, as the SDK reads them. Such a limit has
+/// no counter: JSON lists it under `paymentLimits` as `{param, limit}`, and
+/// the table shows it without a spent or remaining amount. A document that
+/// carries its own `paymentLimits` keeps them.
+pub(crate) fn show(out: &mut Out, network: &str, document: Value, payment: &[PaymentLimit]) {
     let mut document = with_explorer(network, document);
-    let uncounted = uncounted_limits(params, &Limits::of(&document).unwrap_or_default());
+    let own = WalletLimits::payment_of(&document);
+    let payment = own.as_deref().unwrap_or(payment);
     if out.json {
-        if document.is_object() && !uncounted.is_empty() {
-            document[UNCOUNTED_LIMITS] = serde_json::to_value(&uncounted).unwrap_or_default();
+        if document.is_object() && own.is_none() && !payment.is_empty() {
+            document[WalletLimits::PAYMENT_KEY] = serde_json::to_value(payment).unwrap_or_default();
         }
         out.json_value(&document);
         return;
     }
     let (rows, limits) = rows(&document);
     out.stdout.push_str(&term::render(&rows));
-    let limits = limits_table(&limits, &uncounted);
+    let limits = limits_table(&limits, payment);
     if !limits.is_empty() {
         out.line("");
         out.table(&limits);
@@ -221,7 +196,8 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<LimitReport>) {
         let shown = leading.contains(&key.as_str())
             || (key == Settlement::KEY && settlement.is_some())
             || (key == FEE_CHARGED && charged.is_some())
-            || (key == Limits::KEY && limits.is_some());
+            || (key == Limits::KEY && limits.is_some())
+            || (key == WalletLimits::PAYMENT_KEY && WalletLimits::payment_of(document).is_some());
         if !shown {
             term::flatten(key.clone(), value, &mut rows);
         }
@@ -230,13 +206,11 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<LimitReport>) {
 }
 
 /// The table of limits, header first; empty without a limit. `spent`
-/// includes the fees that the limits count. A limit without a counter has
-/// no spent or remaining amount, so those cells hold `-`: the table never
+/// includes the fees that the limits count. A per-payment limit has no
+/// counter, so its spent and remaining cells hold `-`: the table never
 /// shows a zero that nothing counted.
-pub(crate) fn limits_table(
-    limits: &[LimitReport],
-    uncounted: &[UncountedLimit],
-) -> Vec<Vec<String>> {
+pub(crate) fn limits_table(limits: &[LimitReport], payment: &[PaymentLimit]) -> Vec<Vec<String>> {
+    let uncounted = uncounted(payment, limits);
     let mut table = vec![];
     if !limits.is_empty() || !uncounted.is_empty() {
         table.push(
@@ -256,7 +230,7 @@ pub(crate) fn limits_table(
     for limit in uncounted {
         table.push(vec![
             limit.param.clone(),
-            limit.limit.clone(),
+            limit.limit.text.clone(),
             "-".into(),
             "-".into(),
         ]);
@@ -359,24 +333,19 @@ mod tests {
         }
     }
 
-    fn line(key: &str, value: &str) -> ParamLine {
-        ParamLine {
-            key: key.into(),
-            label: key.into(),
-            value: value.into(),
+    fn payment(units: i128) -> PaymentLimit {
+        PaymentLimit {
+            param: "payment_limit".into(),
+            limit: serde_json::from_value(quantity(units)).unwrap(),
         }
     }
 
     #[test]
     fn a_limit_of_each_payment_shows_without_counters() {
-        let lines = [
-            line("payment_limit", "1 XYZ"),
-            line("daily_spending_limit", "10 XYZ"),
-            line("destinations", "GABC"),
-        ];
+        let limits = [payment(10_000_000)];
         // Text: the limit is a row of the table, and nothing counts it.
         let mut out = Out::new(false, true, false, true);
-        show(&mut out, "example:none", settled(), &lines);
+        show(&mut out, "example:none", settled(), &limits);
         assert!(
             out.stdout.ends_with(
                 "param                    limit    spent          remaining\n\
@@ -387,26 +356,41 @@ mod tests {
             "{}",
             out.stdout
         );
-        // JSON: the reports stay as the SDK types them; the limit has its own key.
+        // JSON: the reports stay as the SDK types them; the limit has the SDK's own key and shape.
         let mut out = Out::new(true, true, false, true);
-        show(&mut out, "example:none", settled(), &lines);
+        show(&mut out, "example:none", settled(), &limits);
         let printed: Value = serde_json::from_str(&out.stdout).unwrap();
         assert_eq!(printed[Limits::KEY], settled()[Limits::KEY]);
         assert_eq!(
-            printed[UNCOUNTED_LIMITS],
-            json!([{"param": "payment_limit", "limit": "1 XYZ"}])
+            printed[WalletLimits::PAYMENT_KEY],
+            json!([{"param": "payment_limit", "limit": quantity(10_000_000)}])
         );
+        assert_eq!(WalletLimits::payment_of(&printed), Some(limits.to_vec()));
         assert_eq!(Limits::of(&printed), Limits::of(&settled()));
         // A request without a report still shows the limit, and no zero.
         let pending = json!({"requestId": "pay-0001", "status": "submitted"});
         let mut out = Out::new(false, true, false, true);
-        show(&mut out, "example:none", pending, &lines);
+        show(&mut out, "example:none", pending.clone(), &limits);
         assert_eq!(
             out.stdout,
             "requestId  pay-0001\nstatus     submitted\n\n\
              param          limit  spent  remaining\n\
              payment_limit  1 XYZ  -      -\n"
         );
+        // A document that carries its own per-payment limits keeps them, in text and in JSON.
+        let mut own = pending.clone();
+        own[WalletLimits::PAYMENT_KEY] = json!([payment(20_000_000)]);
+        let mut out = Out::new(false, true, false, true);
+        show(&mut out, "example:none", own.clone(), &limits);
+        assert!(
+            out.stdout.ends_with("payment_limit  2 XYZ  -      -\n"),
+            "{}",
+            out.stdout
+        );
+        assert!(!out.stdout.contains("paymentLimits"), "{}", out.stdout);
+        let mut out = Out::new(true, true, false, true);
+        show(&mut out, "example:none", own.clone(), &limits);
+        assert_eq!(serde_json::from_str::<Value>(&out.stdout).unwrap(), own);
         // A limit that the rail reports with counters is not repeated, and a
         // profile without the param adds nothing.
         let counted = LimitReport {
@@ -415,9 +399,11 @@ mod tests {
             spent: serde_json::from_value(quantity(0)).unwrap(),
             remaining: serde_json::from_value(quantity(1)).unwrap(),
         };
-        assert_eq!(uncounted_limits(&lines, &[counted]), vec![]);
-        assert_eq!(uncounted_limits(&lines[1..], &[]), vec![]);
+        assert_eq!(limits_table(&[counted], &limits).len(), 2);
         assert!(limits_table(&[], &[]).is_empty());
+        let mut out = Out::new(true, true, false, true);
+        show(&mut out, "example:none", pending.clone(), &[]);
+        assert_eq!(serde_json::from_str::<Value>(&out.stdout).unwrap(), pending);
     }
 
     fn deployed(hash: &str) -> Value {

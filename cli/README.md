@@ -163,14 +163,18 @@ Repeat the same `exec` or read `status`. A new request ID represents a new opera
 Terminal status requires a verified receipt. A rotated agent key can recover an original receipt without a new operation signature.
 `--wait DUR` bounds status polling only. Prepare and submit are not bounded.
 When the server cannot resolve a request in one status read, the CLI reads the status again until the wait ends.
-If the request is still unresolved then, the command prints the server's message and exits 5. Read the same request ID again with `status`.
+If the request is still unresolved then, the command prints the server's code and message, such as `operation_unresolved`, and exits 5. Read the same request ID again with `status`.
+A refused request prints the server's code and message, such as `operation_refused`, and exits 4.
 
 `exec` and `status` print the receipt of a settled request: the transaction hash, the `height` of its block or ledger,
 the network `fee`, the moved `amount`, and the rail's `explorer` link when it has one.
 When the result carries them, the receipt also shows `feeCharged`, the fee that counted against the spending limits,
 and one row for each spending limit with its `limit`, `spent` and `remaining` amounts. `spent` includes fees.
 A limit for each payment, `payment_limit`, has no counter. `exec`, `status` and `wallet show` print it in the same table with `-` for `spent` and `remaining`.
-JSON lists it under `uncountedLimits` as `{param, limit}`; `limits` holds only the limits that the rail counts.
+JSON lists it under `paymentLimits` as `{param, limit}`, where `limit` is a quantity; `limits` holds only the limits that the rail counts.
+`wallet show` reads the limits of the wallet from the server with the selected agent key, so a wallet that has made no payment shows its limits.
+When the server cannot read the counters, `limits` is `null` in JSON and the text says so; the table never shows a zero that nothing counted.
+When the server refuses the read, `wallet show` still prints the wallet, warns with the server's code and message, and prints no limit.
 Every amount is a quantity `{units, asset, text}`. Text output prints `text`, which carries the asset's real unit.
 `wallet show` and `policy show` include `walletKind`, the kind that the profile binds.
 They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
