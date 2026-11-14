@@ -96,6 +96,7 @@ allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
 allowit policy check POLICY.rs [--compile]
+allowit policy build POLICY_ID (--ticket TICKET --server-key PUBLIC_KEY | --owner-key NAME --origin ORIGIN) [--out WASM]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
 allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
@@ -214,7 +215,7 @@ Then inspect it with `wallet show` and `policy show`.
 Each vendor plugin describes its public profile configuration and native request formats.
 [Known issues](../known_issues.md) describes compatibility with older exports.
 `ALLOWIT_URL` selects the server origin for owner requests and profile import. Without it the server is the
-production origin, `https://app.allowit.xyz`; `config show` names the origin and whether it is the default.
+production origin, `https://app.allowit.ai`; `config show` names the origin and whether it is the default.
 The SDK retains that origin with each cached profile. Selecting an address does not fetch or import a profile.
 
 Use only commands and operations advertised by `rail show`.
@@ -369,11 +370,37 @@ Pass an independent RPC endpoint with `--rpc-url URL`, or configure it for the s
 Use stable request IDs to resume interrupted owner operations.
 
 1. Generate and review the public policy draft.
-2. For a contract wallet, supply the reviewed executable and run `policy deploy` with explicit agent and server addresses.
+2. For a contract wallet, supply the reviewed executable and run `policy deploy` with explicit agent and server addresses. For a Custom wallet, build the executable first with `policy build`.
 3. Run `policy fund` to fund the selected deployment.
 4. Run `policy activate` for the exact source and parameters.
 5. Run `policy export` with the completed activation ID. This saves the verified public profile locally and prints its public descriptor.
 6. Select the agent key and wallet. Then use `exec` and `status`.
+
+### Build a Custom wallet
+
+A Custom wallet runs code that is built from the exact policy source. The owner builds it; the server does not
+build it and keeps no list of builds.
+
+```sh
+# From the app: copy the command that Review and sign shows.
+allowit policy build POLICY_ID --ticket TICKET --server-key PUBLIC_KEY
+# With a local owner key: the command reads the ticket and signs the attestation itself.
+allowit policy build POLICY_ID --owner-key owner --origin ORIGIN --out wallet.wasm --yes
+```
+
+1. The command reads the policy source that the server admitted, with the server presignature of the network,
+   the policy id and the source hash. It compiles nothing unless the trusted server key signed exactly that source.
+   The trusted key is `--server-key`, or the key that `rail trust` pinned; two keys that differ stop the build.
+2. The rail of the policy builds the wallet code in `custom-build/` of the configuration directory. The build
+   prints the tools that it needs when one is missing (`custom_toolchain_missing`).
+3. The command hands the code to the server, which keeps the bytes for the owner's code upload.
+4. With `--owner-key`, the command signs the build attestation: the owner's signature over the presignature and
+   the code hash. Without it, the owner's wallet signs the same message in the app, and the app continues.
+5. `policy deploy --executable wallet.wasm` then creates the wallet as for every other kind. The server verifies
+   that the wallet's code on the ledger is the attested code.
+
+The command prints the `code hash`. An attested build does not change (`custom_build_attested`); a revised policy
+source needs a new build.
 
 For account policies, configure native roles with `wallet setup` before activation.
 The selected capability validates addresses, fee units, executable format and native signing intent.
