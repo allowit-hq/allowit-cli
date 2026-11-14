@@ -170,6 +170,9 @@ A refused request prints the server's code and message, such as `operation_refus
 the network `fee`, the moved `amount`, and the rail's `explorer` link when it has one.
 When the result carries them, the receipt also shows `feeCharged`, the fee that counted against the spending limits,
 and one row for each spending limit with its `limit`, `spent` and `remaining` amounts. `spent` includes fees.
+For a keypair account `feeCharged` is the network fee. A contract wallet counts the fee that its transaction can be
+charged: the rail simulates the operation and the server signs that fee before the wallet executes. It is at least the
+network `fee`, and it is no longer the installed fee bound.
 A limit for each payment, `payment_limit`, has no counter. `exec`, `status` and `wallet show` print it in the same table with `-` for `spent` and `remaining`.
 JSON lists it under `paymentLimits` as `{param, limit}`, where `limit` is a quantity; `limits` holds only the limits that the rail counts.
 `wallet show` reads the limits of the wallet from the server with the selected agent key, so a wallet that has made no payment shows its limits.
