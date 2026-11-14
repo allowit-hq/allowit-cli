@@ -1,4 +1,5 @@
 //! Portable source validation, generation, owner workflows and installed-policy inspection.
+mod build;
 mod check;
 mod generate;
 mod kinds;
@@ -31,6 +32,8 @@ pub(crate) enum Command {
     #[command(before_help=params::VERIFY_EXAMPLES)]
     Verify(params::Verify),
     ExportPair(params::ExportPair),
+    #[command(before_help=build::EXAMPLES)]
+    Build(build::Args),
     #[command(before_help=kinds::EXAMPLES)]
     Kinds(kinds::Args),
     #[command(before_help=generate::EXAMPLES)]
@@ -52,6 +55,7 @@ pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Update(a) => params::update(a, cx),
         Command::Verify(a) => params::verify(a, cx),
         Command::ExportPair(a) => params::export_pair(a, cx),
+        Command::Build(a) => build::run(a, cx),
         Command::Kinds(a) => kinds::run(a, cx),
         Command::Generate(a) => generate::run(a, cx),
         Command::Show(a) => show::run(a, cx),

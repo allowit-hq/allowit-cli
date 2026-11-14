@@ -60,6 +60,24 @@ pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
 pub(crate) fn load_for_server(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
     with_rpc(cx, name, String::new())
 }
+/// The owner of a server command under a server authority that the caller resolved itself, such
+/// as the server key of a build command. It needs no RPC endpoint.
+pub(crate) fn load_for_authority(
+    cx: &mut Ctx,
+    name: &str,
+    authority: allowit_sdk::config::ServerAuthority,
+) -> Result<LocalOwner> {
+    let rail = cx.rail()?;
+    let signer = signer(cx, name)?;
+    Ok(LocalOwner {
+        network: rail.id,
+        rpc: String::new(),
+        root: cx.dir()?,
+        signer,
+        backend: cx.server_url()?,
+        authority,
+    })
+}
 fn with_rpc(cx: &mut Ctx, name: &str, rpc: String) -> Result<LocalOwner> {
     let rail = cx.rail()?;
     let signer = signer(cx, name)?;
