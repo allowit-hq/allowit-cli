@@ -32,6 +32,9 @@ pub(crate) struct Out {
     pub raw: bool,
     /// The request this command acts on, for JSON errors.
     pub request_id: Option<String>,
+    /// What the evaluation of a denied request cost the policy owner, for the
+    /// error of that request.
+    pub credits: Option<crate::credits::Charge>,
     /// Write progress, with any pending stderr, at once instead of when the
     /// command ends, so an interrupted command keeps its request ID.
     pub live: bool,
@@ -72,6 +75,7 @@ impl Out {
             kind: Kind::Text,
             raw: false,
             request_id: None,
+            credits: None,
             live: false,
         }
     }

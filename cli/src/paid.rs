@@ -190,7 +190,7 @@ fn pay(
     request: &str,
     request_id: String,
     wait: Duration,
-) -> Result<(Value, Vec<PaymentLimit>, String)> {
+) -> Result<(Value, Vec<PaymentLimit>, String, crate::credits::Lookup)> {
     let planned = exec::plan(
         exec::RequestArgs {
             op: "transfer".into(),
@@ -207,6 +207,7 @@ fn pay(
         cx,
     )?;
     let adapter = planned.adapter;
+    let lookup = adapter.charge_lookup(cx, &planned.binding, None);
     let result = adapter.exec_outcome(cx, &planned.request, planned.binding);
     let code = match &result {
         Ok((outcome, _)) => exit::execution_status(outcome.status.clone()).code(),
@@ -239,7 +240,7 @@ fn pay(
         error.code = exit::execution_status(outcome.status).code();
         return Err(error);
     }
-    Ok((outcome.document, payment, paid_by))
+    Ok((outcome.document, payment, paid_by, lookup))
 }
 
 fn delivered(reply: SellerResponse, payment: Option<Payment>) -> Delivered {
@@ -394,8 +395,12 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
-    let (receipt, payment_limits, paid_by) = pay(cx, &challenge, &digest, request_id, call.wait)?;
+    let (mut receipt, payment_limits, paid_by, lookup) =
+        pay(cx, &challenge, &digest, request_id, call.wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
+    // The proof holds the receipt as the server sent it; the shown receipt adds what its
+    // evaluation cost the policy owner.
+    lookup.attach(&mut receipt, &paid_by);
     crate::flush_stderr(&mut cx.out.stderr);
     allowit_sdk::progress::report("Presenting the proof of payment to the seller");
     let second = paid_service::send(&request, Some(&proof)).map_err(|error| {

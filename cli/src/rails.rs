@@ -386,9 +386,37 @@ impl Rail {
             )?);
             return Ok(0);
         }
-        let (out, payment) = self.exec_outcome(cx, r, binding)?;
+        let lookup = self.charge_lookup(cx, &binding, None);
+        let (mut out, payment) = match self.exec_outcome(cx, r, binding) {
+            Ok(result) => result,
+            Err(error) => {
+                // A denied request was evaluated: its error shows what that cost the owner.
+                if crate::credits::charged_denial(&error) {
+                    cx.out.credits = lookup.read(&r.request_id);
+                }
+                return Err(error);
+            }
+        };
+        lookup.attach(&mut out.document, &r.request_id);
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
+    }
+    /// Where the charge of a request under `binding` is read: the server of
+    /// its profile, else `backend`, else `ALLOWIT_URL` or the production
+    /// server; and its policy.
+    pub(crate) fn charge_lookup(
+        &self,
+        cx: &Ctx,
+        binding: &Binding,
+        backend: Option<&str>,
+    ) -> crate::credits::Lookup {
+        let origin = binding
+            .profile
+            .as_ref()
+            .map(|profile| profile.server_origin().to_owned())
+            .or_else(|| backend.map(str::to_owned))
+            .or_else(|| cx.server_url().ok());
+        crate::credits::Lookup::new(origin, binding.policy.clone())
     }
     /// Sends one request and returns its outcome with the per-payment limits
     /// of its profile, and prints nothing. `exec` prints the receipt; a paid
@@ -456,7 +484,9 @@ impl Rail {
         wait: Duration,
         backend: Option<&str>,
     ) -> Result<i32> {
-        let (out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
+        let lookup = self.charge_lookup(cx, &binding, backend);
+        let (mut out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
+        lookup.attach(&mut out.document, id);
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
     }

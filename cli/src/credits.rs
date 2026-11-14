@@ -1,0 +1,273 @@
+//! Credits: what Allowit charges the owner of a policy for each evaluation.
+//!
+//! The agent holds no credits and needs none. This module reads what the
+//! evaluation of one request cost, for the receipt and the status, and it
+//! explains the refusals that name credits: what happened and what the owner
+//! must do. Every server text is checked before it is printed.
+use crate::error::Error;
+use allowit_sdk::transport::{
+    http::{HttpClient, Method, Request},
+    rpc::Options,
+};
+use serde_json::{Value, json};
+use std::time::Duration;
+
+/// The key of the charge in a receipt, a status and a JSON error.
+pub(crate) const KEY: &str = "credits";
+
+/// The server refused before the evaluation: the owner cannot pay one.
+pub(crate) const EXHAUSTED: &str = "credits_exhausted";
+/// The evaluation stopped before a metered call that the owner's credits do
+/// not cover. The request is denied.
+pub(crate) const INSUFFICIENT: &str = "credits_insufficient";
+/// The policy's analysis allowance does not cover a metered call today.
+pub(crate) const ALLOWANCE: &str = "allowance_exhausted";
+/// The server is evaluating the same request now.
+pub(crate) const RUNNING: &str = "evaluation_running";
+
+/// What the evaluation of one request cost its policy owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Charge {
+    /// The credits charged, as a decimal.
+    pub charged: String,
+    /// The version of the price list that priced the evaluation.
+    pub tariff: String,
+    /// Each priced item and its credits.
+    pub lines: Vec<(String, String)>,
+}
+
+/// A decimal amount of credits: digits, at most one point, at most 24 bytes.
+fn amount(text: &str) -> Option<String> {
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, "0"));
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    (text.len() <= 24 && digits(whole) && digits(fraction)).then(|| text.to_owned())
+}
+
+/// A server name as a plain word: letters, digits, `_`, `-` and `.`.
+fn word(text: &str, limit: usize) -> Option<String> {
+    (!text.is_empty()
+        && text.len() <= limit
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b)))
+    .then(|| text.to_owned())
+}
+
+impl Charge {
+    /// The charge in a server document `{charged, tariff, lines}`. A document
+    /// with any text that is not a plain amount or word is no charge.
+    pub(crate) fn of(value: &Value) -> Option<Self> {
+        let lines = value["lines"]
+            .as_array()?
+            .iter()
+            .take(64)
+            .map(|line| {
+                Some((
+                    word(line["item"].as_str()?, 32)?,
+                    amount(line["credits"].as_str()?)?,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            charged: amount(value["charged"].as_str()?)?,
+            tariff: word(value["tariff"].as_str()?, 32)?,
+            lines,
+        })
+    }
+    /// The charge as JSON output carries it.
+    pub(crate) fn document(&self) -> Value {
+        json!({
+            "charged": self.charged,
+            "tariff": self.tariff,
+            "lines": self.lines.iter().map(|(item, credits)| json!({"item": item, "credits": credits})).collect::<Vec<_>>(),
+            "paidBy": "owner",
+        })
+    }
+    /// One text row: the credits, each priced item and who paid.
+    pub(crate) fn text(&self) -> String {
+        let items: Vec<String> = self
+            .lines
+            .iter()
+            .map(|(item, credits)| format!("{} {credits}", item.replace('_', " ")))
+            .collect();
+        let items = if items.len() > 1 {
+            format!(" ({})", items.join(", "))
+        } else {
+            String::new()
+        };
+        format!(
+            "{}{items}, charged to the policy owner, price list {}",
+            self.charged, self.tariff
+        )
+    }
+}
+
+/// Where the charge of a request is read: the server and the policy.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Lookup {
+    origin: Option<String>,
+    policy: Option<String>,
+}
+
+impl Lookup {
+    pub(crate) fn new(origin: Option<String>, policy: Option<String>) -> Self {
+        Self { origin, policy }
+    }
+    /// The charge of `request`, when the server holds one. It is a read
+    /// without a credential, and a server that does not answer it leaves the
+    /// result of the command as it is.
+    pub(crate) fn read(&self, request: &str) -> Option<Charge> {
+        let origin = crate::config::parse_origin(self.origin.as_deref()?).ok()?;
+        let policy = self.policy.as_deref()?;
+        if !crate::commands::policy_help::is_policy_id(policy)
+            || !crate::request::request_id_valid(request)
+        {
+            return None;
+        }
+        let url = format!("{origin}/api/agent/charge?id={policy}&request={request}");
+        let client = HttpClient::new(Options {
+            timeout: Duration::from_secs(5),
+            max_response_bytes: 64 << 10,
+            no_proxy: false,
+            connect_timeout: Some(Duration::from_secs(3)),
+        })
+        .ok()?;
+        let response = client
+            .send_refusal_body(
+                Request {
+                    method: Method::Get,
+                    url: &url,
+                    headers: &[("accept".into(), "application/json".into())],
+                    body: None,
+                },
+                None,
+            )
+            .ok()?;
+        if response.status != 200 {
+            return None;
+        }
+        let body: Value = serde_json::from_slice(&response.body).ok()?;
+        Charge::of(&body[KEY])
+    }
+    /// `document` with the charge of `request`, when the server holds one.
+    pub(crate) fn attach(&self, document: &mut Value, request: &str) {
+        if document.is_object()
+            && let Some(charge) = self.read(request)
+        {
+            document[KEY] = charge.document();
+        }
+    }
+}
+
+/// What a refusal that names credits means: the cause, and what to do.
+pub(crate) struct Explained {
+    pub message: &'static str,
+    pub cause: &'static str,
+    pub fix: &'static str,
+}
+
+/// The explanation of the server code `code`, when it names credits.
+pub(crate) fn explained(code: &str) -> Option<Explained> {
+    Some(match code {
+        EXHAUSTED => Explained {
+            message: "Allowit did not evaluate this request: the owner of the policy has no credits left",
+            cause: "Allowit charges the policy owner credits for each evaluation, and the owner's balance does not cover one. Nothing was signed or sent, and no credits were charged.",
+            fix: "Tell the owner to get credits from Allowit; the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.",
+        },
+        INSUFFICIENT => Explained {
+            message: "The request is denied: the policy needed a metered call that the owner's credits do not cover",
+            cause: "The policy looks something up or asks a model before it decides. The owner's credits paid the evaluation and not that call, so the call was not made.",
+            fix: "Tell the owner to get credits from Allowit. Then send the request again with a new request ID. Do not work around the denial.",
+        },
+        ALLOWANCE => Explained {
+            message: "The request is denied: the analysis allowance of the policy is used up for today",
+            cause: "The owner limits how many search and model calls the policy may make each day, and how many credits they may cost. This request needed one more.",
+            fix: "Tell the owner to raise the analysis allowance of the policy in the app, or wait until 00:00 UTC. Then send the request again with a new request ID.",
+        },
+        RUNNING => Explained {
+            message: "Allowit is evaluating this request now",
+            cause: "An earlier call with the same request ID has not ended.",
+            fix: "Read the request with `allowit status ID --wait 60s`, with the same request ID.",
+        },
+        _ => return None,
+    })
+}
+
+/// True for a denial that Allowit charged: a policy denial, or a metered call
+/// that the credits or the allowance did not cover.
+pub(crate) fn charged_denial(error: &Error) -> bool {
+    error.code == crate::exit::Exit::Denied.code()
+        || matches!(error.api_code.as_deref(), Some(INSUFFICIENT | ALLOWANCE))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_charge_reads_only_plain_amounts_and_words() {
+        let charge = Charge::of(&json!({
+            "charged": "1.1", "tariff": "2026-11-14",
+            "lines": [{"item": "base", "credits": "1.0"}, {"item": "decision_api", "credits": "0.1", "usdNanos": 29000}],
+        }))
+        .unwrap();
+        assert_eq!(
+            charge.text(),
+            "1.1 (base 1.0, decision api 0.1), charged to the policy owner, price list 2026-11-14"
+        );
+        assert_eq!(charge.document()["paidBy"], "owner");
+        assert_eq!(charge.document()["lines"][1]["item"], "decision_api");
+        let simple = Charge::of(&json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "1.0"}]})).unwrap();
+        assert_eq!(
+            simple.text(),
+            "1.0, charged to the policy owner, price list v1"
+        );
+        // Server text never reaches the terminal unchecked.
+        for bad in [
+            json!({"charged": "1.0\u{1b}[31m", "tariff": "v1", "lines": []}),
+            json!({"charged": "-1.0", "tariff": "v1", "lines": []}),
+            json!({"charged": "1e3", "tariff": "v1", "lines": []}),
+            json!({"charged": 1.0, "tariff": "v1", "lines": []}),
+            json!({"charged": "1.0", "tariff": "v1 $(rm)", "lines": []}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base\nx", "credits": "1.0"}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "one"}]}),
+            json!({"charged": "1.0", "tariff": "v1"}),
+            json!(null),
+        ] {
+            assert!(Charge::of(&bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn each_credit_refusal_has_a_cause_and_a_fix_for_the_owner() {
+        for code in [EXHAUSTED, INSUFFICIENT, ALLOWANCE] {
+            let text = explained(code).unwrap();
+            assert!(text.fix.contains("owner"), "{code}");
+            assert!(!text.cause.is_empty() && !text.message.is_empty());
+        }
+        // The agent never needs credits of its own.
+        assert!(
+            explained(EXHAUSTED)
+                .unwrap()
+                .fix
+                .contains("You need no credits of your own")
+        );
+        assert!(explained(RUNNING).unwrap().fix.contains("allowit status"));
+        assert!(explained("policy_denied").is_none());
+    }
+
+    #[test]
+    fn a_lookup_without_a_server_or_a_policy_reads_nothing() {
+        assert!(Lookup::default().read("pay-0001").is_none());
+        let lookup = Lookup::new(
+            Some("http://127.0.0.1:9".into()),
+            Some("not a policy id".into()),
+        );
+        assert!(lookup.read("pay-0001").is_none());
+        let lookup = Lookup::new(
+            Some("http://127.0.0.1:9".into()),
+            Some("Xg7IxRXCr2MhVdRrTFoYKeAw".into()),
+        );
+        assert!(lookup.read("bad id").is_none());
+    }
+}
