@@ -35,6 +35,11 @@ pub(crate) struct Entry {
     /// request ID presents the proof of this challenge and never pays another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub challenge: Option<allowit_sdk::paid_service::Challenge>,
+    /// The digest of the whole seller request of a paid call: its method, URL,
+    /// headers and body. A retry with the same request ID must send the same
+    /// request: the payment bought that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_request: Option<String>,
 }
 
 /// The folder of one request ID.
@@ -91,6 +96,7 @@ pub(crate) fn record(dir: &Path, entry: &Entry) -> Result<()> {
             || old.to != entry.to
             || old.amount != entry.amount
             || old.challenge != entry.challenge
+            || old.paid_request != entry.paid_request
         {
             return Err(Error::usage(format!(
                 "request ID {} already names a different request; use a new --request-id",
@@ -178,6 +184,7 @@ mod tests {
             created_at: at,
             exit: None,
             challenge: None,
+            paid_request: None,
         }
     }
     #[test]

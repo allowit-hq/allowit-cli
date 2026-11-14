@@ -224,12 +224,14 @@ A paid call runs these steps:
 5. The CLI requests the resource once more with the proof of the settled payment and prints the resource.
 
 The receipt of the payment prints on stderr, as `exec` prints it: the transaction, the ledger, the fee, the
-counted fee and the limits. Stdout holds the resource alone, so a pipe reads only the resource. `--json`
+counted fee and the limits. Stdout holds the resource alone: a pipe or a file gets its exact bytes, and a
+terminal gets display controls escaped. `--json`
 prints one document: `status`, `contentType`, `body` and `payment` with its `requestId`, `price` and
 `receipt`. `-o FILE` writes the resource to a file; a resource that is not text needs it.
 
-A call never pays twice. A request ID names one seller challenge, and the journal keeps the challenge with
-the ID. The CLI prints the request ID on stderr before it pays. After an interrupted call, or a seller that
+A call never pays twice. A request ID names one seller challenge and one seller request: the journal keeps
+the challenge and a digest of the method, the URL, the headers and the body with the ID, and refuses another
+request under the same ID. The CLI prints the request ID on stderr before it pays. After an interrupted call, or a seller that
 did not deliver, run the command again with `--request-id ID`: it reads the settled payment and presents
 its proof again. The server also pays one seller challenge ID once for a policy: it refuses a second request
 ID for that challenge, and the CLI then reads the original request.

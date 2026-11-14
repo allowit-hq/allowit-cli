@@ -154,11 +154,14 @@ fn show(cx: &mut Ctx, delivered: &Delivered, output: Option<&PathBuf>) -> Result
             path.display(),
             delivered.body.len()
         )),
-        // The resource as the seller sent it: no byte is added.
-        None => cx
-            .out
-            .stdout
-            .push_str(&String::from_utf8_lossy(&delivered.body)),
+        None => {
+            // The resource as the seller sent it. A pipe or a file gets its exact
+            // bytes; a terminal gets display controls escaped, as all output does.
+            cx.out.raw = !std::io::IsTerminal::is_terminal(&std::io::stdout());
+            cx.out
+                .stdout
+                .push_str(&String::from_utf8_lossy(&delivered.body));
+        }
     }
     Ok(0)
 }

@@ -113,6 +113,7 @@ fn seller() -> Stub {
     Stub::new(|_, target| match target {
         "/free" => (200, "text/plain", "A free notice.\n".into()),
         "/json" => (200, "application/json", "{\"answer\":42}".into()),
+        "/crlf" => (200, "text/plain", "first\r\nsecond\ttab\u{1b}[0m".into()),
         "/injection" => (
             200,
             "text/plain",
@@ -245,6 +246,10 @@ fn curl_and_call_return_a_free_resource_without_any_payment_or_engine_request() 
         sandbox.ok(&["curl", &format!("{}/json", seller.url)]),
         "{\"answer\":42}"
     );
+    // A pipe gets the exact bytes: line endings and control characters stay as they are.
+    let output = sandbox.run(&["curl", &format!("{}/crlf", seller.url)]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert_eq!(output.stdout, b"first\r\nsecond\ttab\x1b[0m");
     // JSON is one document with the status and the body, and no payment.
     let document = sandbox.json(&["curl", &format!("{}/json", seller.url)]);
     assert_eq!(document["status"], 200);

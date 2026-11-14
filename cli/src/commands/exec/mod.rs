@@ -89,17 +89,26 @@ pub(crate) struct Planned {
     pub dir: std::path::PathBuf,
 }
 
+/// The seller's challenge that a request pays and the digest of the seller
+/// request that the payment buys.
+pub(crate) struct Paid<'a> {
+    pub challenge: &'a allowit_sdk::paid_service::Challenge,
+    pub request: &'a str,
+}
+
 /// Validates, builds and journals one request. Every input check runs here,
-/// once; the rail adapter receives a checked request. `challenge` is the
-/// seller's challenge that the request pays, when it is a paid call: the
-/// journal keeps it with the request ID and the request carries its context.
+/// once; the rail adapter receives a checked request. `paid` is what the
+/// request pays for, when it is a paid call: the journal keeps the challenge
+/// and the seller request with the request ID, and the request carries the
+/// context of the challenge.
 pub(crate) fn plan(
     a: RequestArgs,
     build_only: bool,
     command: &str,
-    challenge: Option<&allowit_sdk::paid_service::Challenge>,
+    paid: Option<Paid<'_>>,
     cx: &mut Ctx,
 ) -> Result<Planned> {
+    let challenge = paid.as_ref().map(|paid| paid.challenge);
     check_op(&a.op)?;
     let rail = cx.rail()?;
     let adapter = cx.adapter()?;
@@ -185,6 +194,7 @@ pub(crate) fn plan(
                 profile_version: binding.profile.as_ref().map(|p| p.version.clone()),
                 server_origin: binding.profile.as_ref().map(|p| p.server_origin().into()),
                 challenge: challenge.cloned(),
+                paid_request: paid.as_ref().map(|paid| paid.request.to_owned()),
             },
         )?;
     }
@@ -245,6 +255,7 @@ mod tests {
             created_at: 0,
             exit: None,
             challenge: None,
+            paid_request: None,
         };
         journal::record(&dir, &entry).unwrap();
         let held = journal::lock(&dir, "pay-0001").unwrap();

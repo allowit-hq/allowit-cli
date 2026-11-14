@@ -104,11 +104,37 @@ fn within_bound(cx: &mut Ctx, challenge: &Challenge, max_price: Option<&str>) ->
     Ok(())
 }
 
+/// The digest of the whole seller request: the method, the URL, the headers in
+/// name order and the body. The payment of a request ID buys this request.
+fn request_digest(request: &SellerRequest) -> String {
+    let mut headers: Vec<(String, &str)> = request
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.as_str()))
+        .collect();
+    headers.sort();
+    let mut bytes = Vec::new();
+    let mut field = |part: &[u8]| {
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    };
+    field(request.method.as_bytes());
+    field(request.url.as_bytes());
+    for (name, value) in &headers {
+        field(name.as_bytes());
+        field(value.as_bytes());
+    }
+    field(b"body");
+    field(request.body.as_deref().unwrap_or_default());
+    allowit_sdk::digest(&bytes)
+}
+
 /// Pay `challenge` through `exec` under the policy, or resume its payment,
 /// and return the confirmed outcome.
 fn pay(
     cx: &mut Ctx,
     challenge: &Challenge,
+    request: &str,
     request_id: String,
     wait: Duration,
 ) -> Result<(Value, Vec<PaymentLimit>, String)> {
@@ -124,7 +150,7 @@ fn pay(
         },
         false,
         "call",
-        Some(challenge),
+        Some(exec::Paid { challenge, request }),
         cx,
     )?;
     let adapter = planned.adapter;
@@ -231,8 +257,10 @@ fn submitted(cx: &mut Ctx, request_id: &str) -> Result<bool> {
 }
 
 /// The challenge that the journal keeps for `request_id`, when it names a
-/// paid call for this resource.
-fn retained(cx: &mut Ctx, call: &Call) -> Result<Option<Challenge>> {
+/// paid call for exactly this seller request: the same method, URL, headers
+/// and body. Another request under the same ID is refused, so a payment is
+/// never presented for work that it did not buy.
+fn retained(cx: &mut Ctx, call: &Call, request: &str) -> Result<Option<Challenge>> {
     let Some(id) = &call.request_id else {
         return Ok(None);
     };
@@ -246,7 +274,11 @@ fn retained(cx: &mut Ctx, call: &Call) -> Result<Option<Challenge>> {
         return Ok(None);
     };
     match entry.challenge {
-        Some(challenge) if challenge.resource == call.url => Ok(Some(challenge)),
+        Some(challenge)
+            if challenge.resource == call.url && entry.paid_request.as_deref() == Some(request) =>
+        {
+            Ok(Some(challenge))
+        }
         _ => Err(Error::usage(format!(
             "request ID {id} already names a different request; use a new --request-id"
         ))),
@@ -266,9 +298,10 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
     // Before any payment, on both paths: a request that cannot be sent is
     // never paid for.
     check_request(&request)?;
+    let digest = request_digest(&request);
     // A request ID that the journal holds names its original challenge: the
     // seller is not asked for another one.
-    let challenge = match retained(cx, call)? {
+    let challenge = match retained(cx, call, &digest)? {
         Some(challenge) => {
             // A payment that was submitted is only read. One that was not would
             // start now, so the seller must still accept the challenge.
@@ -310,7 +343,7 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
-    let (receipt, payment_limits, paid_by) = pay(cx, &challenge, request_id, call.wait)?;
+    let (receipt, payment_limits, paid_by) = pay(cx, &challenge, &digest, request_id, call.wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
     crate::flush_stderr(&mut cx.out.stderr);
     allowit_sdk::progress::report("Presenting the proof of payment to the seller");
@@ -458,6 +491,43 @@ mod tests {
             unknown.amount.asset.symbol = "NOSUCHASSET".into();
             let error = within_bound(&mut cx, &unknown, Some(&bound("1"))).unwrap_err();
             assert_eq!(error.code, 8, "{}", rail.id());
+        });
+    }
+
+    #[test]
+    fn the_request_digest_covers_the_method_the_url_the_headers_and_the_body() {
+        let base = SellerRequest {
+            method: "POST".into(),
+            url: "https://seller.example/translate".into(),
+            headers: vec![
+                ("Content-Type".into(), "application/json".into()),
+                ("Accept".into(), "text/plain".into()),
+            ],
+            body: Some(b"{\"text\":\"hello\"}".to_vec()),
+        };
+        let digest = request_digest(&base);
+        assert_eq!(digest.len(), 64);
+        // Header order and the case of a header name do not change the request.
+        let mut reordered = base.clone();
+        reordered.headers.reverse();
+        reordered.headers[0].0 = "ACCEPT".into();
+        assert_eq!(request_digest(&reordered), digest);
+        // Every other difference is another request.
+        let changed = |change: &dyn Fn(&mut SellerRequest)| {
+            let mut request = base.clone();
+            change(&mut request);
+            assert_ne!(request_digest(&request), digest);
+        };
+        changed(&|r| r.method = "PUT".into());
+        changed(&|r| r.url = "https://seller.example/translate?lang=fr".into());
+        changed(&|r| r.body = Some(b"{\"text\":\"other\"}".to_vec()));
+        changed(&|r| r.body = None);
+        changed(&|r| r.headers[1].1 = "application/json".into());
+        changed(&|r| r.headers.push(("X-Extra".into(), "1".into())));
+        // Field boundaries are unambiguous.
+        changed(&|r| {
+            r.method = "POSThttps".into();
+            r.url = "://seller.example/translate".into();
         });
     }
 
