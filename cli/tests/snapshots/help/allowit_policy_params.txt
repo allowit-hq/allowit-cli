@@ -1,0 +1,28 @@
+Show or change the typed values of an unsigned draft
+
+Usage: allowit policy params [OPTIONS] <COMMAND>
+
+Examples:
+  allowit policy params show draft.json
+  allowit --json policy params set draft.json daily_spending_limit 5 --owner-key owner --origin http://localhost:5173
+
+Commands:
+  show  Print each param of a policy document in the unit of its asset
+  set   Change typed values of an unsigned draft on the server; prints the next draft
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+Global options:
+  -n, --rail <RAIL>       Rail identifier or alias from rail ls [env: ALLOWIT_RAIL] [alias:
+                          --network]
+      --wallet <ADDR>     Wallet address accepted by the selected rail [env: ALLOWIT_WALLET]
+      --json              Print JSON instead of text
+  -y, --yes               Confirm destructive actions without a prompt
+  -q, --quiet             Print no progress on stderr
+  -v, --verbose           Print the resolved rail, wallet and config directory on stderr
+      --no-color          Disable color (NO_COLOR also disables it)
+      --config-dir <DIR>  Config directory [default: $XDG_CONFIG_HOME/allowit or ~/.config/allowit]
+                          [env: ALLOWIT_CONFIG_DIR]
+      --rpc-url <URL>     RPC URL override for the selected rail
