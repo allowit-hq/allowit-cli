@@ -88,6 +88,16 @@ fn shell_safe(text: &str, limit: usize) -> Result<String> {
     Ok(text.to_owned())
 }
 
+/// A local path as one shell word: bare when no shell interprets it, single-quoted otherwise.
+fn shell_quote(text: &str) -> String {
+    let plain = |b: u8| b.is_ascii_alphanumeric() || b"._~:/%@+-".contains(&b);
+    if !text.is_empty() && text.bytes().all(plain) {
+        text.to_owned()
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+}
+
 fn invalid() -> Error {
     Error::uncertain("The server returned invalid policy facts")
 }
@@ -246,6 +256,15 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
         None => None,
     };
+    // A config directory that this call named stays on every printed command: the
+    // commands then read and write the directory that holds the key found above.
+    let cli = match &cx.global.config_dir {
+        Some(dir) => format!(
+            "allowit --config-dir {}",
+            shell_quote(&dir.to_string_lossy())
+        ),
+        None => "allowit".to_owned(),
+    };
     let with_url = |command: &str| {
         if implicit {
             command.to_owned()
@@ -253,10 +272,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             format!("ALLOWIT_URL={origin} {command}")
         }
     };
-    let again = with_url(&format!("allowit {} help", args.id));
+    let again = with_url(&format!("{cli} {} help", args.id));
     let select = match &endpoint {
-        Some(endpoint) => format!("allowit rail use {} --rpc-url {endpoint}", rail.id),
-        None => format!("allowit rail use {}", rail.id),
+        Some(endpoint) => format!("{cli} rail use {} --rpc-url {endpoint}", rail.id),
+        None => format!("{cli} rail use {}", rail.id),
     };
     let endpoint_note = endpoint.is_none().then(|| {
         format!(
@@ -271,11 +290,11 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         "awaiting_agent_key" => {
             let mut commands = vec![
                 select,
-                "allowit keys generate agent".into(),
-                "allowit keys use agent".into(),
+                format!("{cli} keys generate agent"),
+                format!("{cli} keys use agent"),
             ];
             if rail.testnet {
-                commands.push("allowit keys fund agent".into());
+                commands.push(format!("{cli} keys fund agent"));
             }
             steps.push(Step {
                 title: "Make your key",
@@ -297,7 +316,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                     "The owner has your public key (local key `{name}`) and has not signed yet. Wait, then run: {again}"
                 ),
                 None => format!(
-                    "The owner entered an agent public key that no local key has. Tell the owner your public key (`allowit keys show NAME`). Then run: {again}"
+                    "The owner entered an agent public key that no local key has. Tell the owner your public key (`{cli} keys show NAME`). Then run: {again}"
                 ),
             });
         }
@@ -312,7 +331,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             match &local {
                 None => {
                     next = Some(format!(
-                        "No local key has the agent public key {agent} of this policy, so this device cannot pay. Tell the owner your public key (`allowit keys show NAME`) and stop."
+                        "No local key has the agent public key {agent} of this policy, so this device cannot pay. Tell the owner your public key (`{cli} keys show NAME`) and stop."
                     ));
                 }
                 Some(name) => {
@@ -321,10 +340,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         note: endpoint_note,
                         commands: vec![
                             select,
-                            format!("allowit rail trust {origin} {server_key}"),
-                            format!("allowit keys use {name}"),
-                            with_url(&format!("allowit wallet import --policy {}", args.id)),
-                            format!("allowit wallet use {wallet}"),
+                            format!("{cli} rail trust {origin} {server_key}"),
+                            format!("{cli} keys use {name}"),
+                            with_url(&format!("{cli} wallet import --policy {}", args.id)),
+                            format!("{cli} wallet use {wallet}"),
                         ],
                     });
                     let symbol = symbol.as_deref().unwrap_or("ASSET");
@@ -343,11 +362,14 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         (
                             "pay",
                             with_url(&format!(
-                                "allowit exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
+                                "{cli} exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
                             )),
                         ),
-                        ("status", with_url("allowit status pay-0001 --wait 60s")),
-                        ("history", "allowit history".to_owned()),
+                        (
+                            "status",
+                            with_url(&format!("{cli} status pay-0001 --wait 60s")),
+                        ),
+                        ("history", format!("{cli} history")),
                     ];
                 }
             }
@@ -498,6 +520,18 @@ mod tests {
         assert!(shown("line\nbreak", 80).is_err());
         assert!(shown("\u{1b}[31m", 80).is_err());
         assert_eq!(shown("1 UNIT", 80).unwrap(), "1 UNIT");
+    }
+
+    #[test]
+    fn a_local_path_is_one_shell_word() {
+        assert_eq!(
+            shell_quote("/home/agent/.config/allowit"),
+            "/home/agent/.config/allowit"
+        );
+        assert_eq!(shell_quote("/tmp/my dir"), "'/tmp/my dir'");
+        assert_eq!(shell_quote("/tmp/it's"), "'/tmp/it'\\''s'");
+        assert_eq!(shell_quote("$(id)"), "'$(id)'");
+        assert_eq!(shell_quote(""), "''");
     }
 
     #[test]

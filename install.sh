@@ -14,7 +14,8 @@
 #   ALLOWIT_INSTALL_DIR  the directory of the binary (default: $HOME/.local/bin)
 #   ALLOWIT_VERSION      a release tag such as v0.5.0 (default: the latest release)
 #   ALLOWIT_RELEASE_URL  the base URL of the release files, for a mirror (default: GitHub)
-#   ALLOWIT_REF          the branch, tag or commit of a source build (default: main)
+#   ALLOWIT_REF          the branch, tag or commit of a source build (default: ALLOWIT_VERSION,
+#                        or main without it)
 #   ALLOWIT_FROM_SOURCE  1 builds from source even when a release binary exists
 #   ALLOWIT_NO_DEPS      1 installs no build tool and no Rust; the script names what is missing
 #   ALLOWIT_DRY_RUN      1 prints the plan and changes nothing
@@ -23,7 +24,8 @@ set -eu
 REPO=allowit-hq/allowit-cli
 SOURCE=https://github.com/$REPO
 DIR=${ALLOWIT_INSTALL_DIR:-${HOME:?HOME is not set}/.local/bin}
-REF=${ALLOWIT_REF:-main}
+# A source build of a requested release builds that release, never another revision.
+REF=${ALLOWIT_REF:-${ALLOWIT_VERSION:-main}}
 DRY=${ALLOWIT_DRY_RUN:-0}
 
 say() { printf 'allowit install: %s\n' "$*" >&2; }

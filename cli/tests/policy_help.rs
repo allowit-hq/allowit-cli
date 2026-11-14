@@ -169,6 +169,29 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
             );
             at += found.unwrap();
         }
+        // A config directory named on this call stays on every printed command.
+        let named = sandbox.config().to_string_lossy().into_owned();
+        let (output, _) = served(
+            &mut sandbox,
+            &["--config-dir", &named, "--json", ID, "help"],
+            vec![(200, body.clone())],
+        );
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let commands: Vec<&str> = value["steps"][0]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(value["examples"].as_object().unwrap().values())
+            .map(|command| command.as_str().unwrap())
+            .collect();
+        assert_eq!(commands.len(), 8);
+        for command in commands {
+            assert!(
+                command.contains(&format!("allowit --config-dir {named} ")),
+                "{command}"
+            );
+        }
         // It pinned no server key and imported nothing.
         let config = std::fs::read_to_string(sandbox.config().join("config.toml")).unwrap();
         assert!(!config.contains(&server_key), "{config}");

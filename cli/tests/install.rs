@@ -119,5 +119,22 @@ fn a_release_binary_is_installed_only_when_its_checksum_matches() {
     assert_eq!(fallback.status.code(), Some(1));
     let log = String::from_utf8_lossy(&fallback.stderr).into_owned();
     assert!(log.contains("building from source"), "{log}");
+    // A requested release without a binary builds that release from source, not main.
+    let pinned = Command::new("sh")
+        .arg(script())
+        .env("HOME", &root)
+        .env("ALLOWIT_INSTALL_DIR", root.join("bin"))
+        .env(
+            "ALLOWIT_RELEASE_URL",
+            format!("file://{}", release.display()),
+        )
+        .env("ALLOWIT_VERSION", "v9.9.9")
+        .env("ALLOWIT_NO_DEPS", "1")
+        .env("ALLOWIT_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    let log = String::from_utf8_lossy(&pinned.stderr).into_owned();
+    assert!(log.contains("(v9.9.9)"), "{log}");
+    assert!(!log.contains("(main)"), "{log}");
     let _ = std::fs::remove_dir_all(&root);
 }
