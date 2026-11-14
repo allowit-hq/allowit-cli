@@ -256,14 +256,15 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
         None => None,
     };
-    // A config directory that this call named stays on every printed command: the
-    // commands then read and write the directory that holds the key found above.
+    // A `--config-dir` flag of this call stays on every printed command: the commands then
+    // read and write the directory that holds the key found above. A directory from
+    // `ALLOWIT_CONFIG_DIR` stays in the caller's environment.
     let cli = match &cx.global.config_dir {
-        Some(dir) => format!(
+        Some(dir) if cx.global.config_dir_flag => format!(
             "allowit --config-dir {}",
             shell_quote(&dir.to_string_lossy())
         ),
-        None => "allowit".to_owned(),
+        _ => "allowit".to_owned(),
     };
     let with_url = |command: &str| {
         if implicit {

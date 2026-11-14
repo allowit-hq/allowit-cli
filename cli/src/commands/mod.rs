@@ -108,6 +108,9 @@ pub(crate) struct Global {
     /// True when `--wallet` is on the command line, not from `ALLOWIT_WALLET`.
     #[arg(skip)]
     pub wallet_flag: bool,
+    /// True when `--config-dir` is on the command line, not from `ALLOWIT_CONFIG_DIR`.
+    #[arg(skip)]
+    pub config_dir_flag: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -319,10 +322,12 @@ pub(crate) fn parse(argv: &[String], color: bool) -> Parsed {
             let from_flag =
                 |id: &str| matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
             let (rail_flag, wallet_flag) = (from_flag("rail"), from_flag("wallet"));
+            let config_dir_flag = from_flag("config_dir");
             match Cli::from_arg_matches_mut(&mut matches) {
                 Ok(mut cli) => {
                     cli.global.rail_flag = rail_flag;
                     cli.global.wallet_flag = wallet_flag;
+                    cli.global.config_dir_flag = config_dir_flag;
                     match cli.command {
                         None => Parsed::Print(examples::help(cmd.render_help().to_string(), argv)),
                         Some(_) => Parsed::Run(Box::new(cli)),
