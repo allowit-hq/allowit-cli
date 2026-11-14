@@ -52,6 +52,12 @@ allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID -
 allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
 allowit policy export SELECTION --owner-key NAME --origin ORIGIN --activation-id ID
 allowit policy owner-status ID
+allowit policy params show DOCUMENT
+allowit policy params set DRAFT KEY VALUE [KEY VALUE]... --owner-key NAME --origin ORIGIN
+allowit policy revise DRAFT --instruction TEXT --owner-key NAME --origin ORIGIN
+allowit policy update WALLET KEY VALUE [KEY VALUE]... --owner-key NAME --origin ORIGIN --request-id ID --fee-limit FEE [--expected-revision N]
+allowit policy verify WALLET --owner-key NAME
+allowit policy export-pair DOCUMENT
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
@@ -244,6 +250,79 @@ With `--json`, `policy deploy` and `policy fund` keep the document that the next
 Public profile versions are immutable. A new export does not replace a profile retained for historical status.
 If several profiles match, use `wallet use ADDRESS --profile VERSION` to select one explicitly.
 Imports never infer approved source from an address. Native imports validate portable administrator consent, the independent server pin and current native authority.
+
+## Treasury workflow
+
+A treasury owner delegates payments under a policy, changes its limits when obligations change and checks the
+wallet on the ledger at each step. This section is the reference walkthrough. Each command works on every rail that
+supports it; a rail without a step exits 3. `DRAFT` is the document that `policy generate` prints with `--json`.
+`WALLET` is the document that `policy deploy`, `policy fund` or `policy update` prints with `--json`: each of them
+selects the installed wallet for the next owner command.
+
+```sh
+# 1. Generate the treasury policy. Review its params in asset units and its two placements.
+allowit --json policy generate --owner-key owner --origin ORIGIN --kind standard --new-wallet \
+  'Let my agent pay the data vendor ADDRESS at most 1 per payment and 5 per day' > draft.json
+allowit policy params show draft.json
+allowit policy export-pair draft.json
+
+# 2. Change typed values of the draft before you sign anything. The server checks each value.
+allowit --json policy params set draft.json daily_spending_limit 3 \
+  --owner-key owner --origin ORIGIN > draft-2.json
+
+# 3. Deploy the reviewed wallet, fund it and verify it on the ledger.
+allowit --rpc-url URL --json policy deploy draft-2.json --owner-key owner --origin ORIGIN --agent-key agent \
+  --server ADDRESS --executable wallet.wasm --request-id deploy-0001 --fee-limit FEE --yes > wallet.json
+allowit --rpc-url URL --json policy fund wallet.json --owner-key owner --origin ORIGIN \
+  --request-id fund-0001 --amount 20 --fee-limit FEE --yes
+allowit --rpc-url URL policy verify wallet.json --owner-key owner
+
+# 4. Activate, export the public profile and let the agent operate within the policy.
+allowit --rpc-url URL --json policy activate wallet.json --owner-key owner --origin ORIGIN --request-id activate-0001 --yes
+allowit --rpc-url URL --json policy export wallet.json --owner-key owner --origin ORIGIN --activation-id activate-0001
+allowit keys use agent && allowit wallet use WALLET_ADDRESS
+allowit --rpc-url URL exec --op transfer --to ADDRESS --amount ASSET:0.2 --request-id pay-0001 --wait 5m
+
+# 5. Change a value of the active wallet with one owner signature, then verify again.
+allowit --rpc-url URL --json policy update wallet.json daily_spending_limit 1 --owner-key owner --origin ORIGIN \
+  --request-id update-0001 --fee-limit FEE --yes > wallet-2.json
+allowit --rpc-url URL policy verify wallet-2.json --owner-key owner
+allowit --rpc-url URL --json policy export wallet-2.json --owner-key owner --origin ORIGIN \
+  --activation-id update-0001 > profile-2.json
+allowit --rpc-url URL wallet import profile-2.json
+allowit wallet use WALLET_ADDRESS --profile VERSION
+```
+
+`policy params show` prints each param of a draft or wallet document in the unit of its asset.
+`policy export-pair` prints the two placements of the policy: `host` is what the server evaluates before it signs,
+the complete source with every rule, evidence function and param; `native` is what the wallet kind enforces on each
+operation. A `native` or `simple` wallet enforces no rule itself, a `standard` wallet enforces the ordered standard
+rules, and a `custom` wallet enforces its compiled source. Evidence functions always stay with the server.
+
+`policy params set` takes each key with its value in human units, such as `3` for an amount of the asset or
+`2026-12-31` for an expiry. The CLI parses the values before any key or network access, and the server checks them
+again. `policy revise` sends one change in the owner's words; the model can change the source. Both print the next
+draft and work only on an unsigned draft.
+
+`policy update` changes values of an active wallet. The CLI reads the installed configuration revision through the
+owner's RPC, reconstructs the exact update from `WALLET` and the new values, and signs the server's step only when it
+is that update. The wallet keeps its recorded usage and its request nonce: an update neither raises nor resets what
+the policy has spent. A request that the agent prepared before the update is stale; the agent sends it again.
+Resume an interrupted update with the same `--request-id` and arguments: the CLI sends the saved signed step and
+asks for no second signature. A resumed update keeps the values of its first run, also when a new expiry among
+them has passed since: the server checks an expiry against its clock when it prepares a new step. `--expected-revision N` refuses the update when the wallet is at another revision.
+The printed document selects the wallet with its new values, and its request ID exports the updated public profile
+as an activation ID does. The profile cache then holds the profile from before the update and the updated one:
+`wallet import` prints the `version` of the updated profile, and the agent selects it with
+`wallet use ADDRESS --profile VERSION`. A typed server refusal, such as `param_out_of_range` or `update_unavailable`, exits 4.
+
+`policy verify` reads the wallet through the owner's RPC, without the server and without a signature. It compares
+`WALLET` with the ledger: the executable, the source binding, the rules, the params, the wallet kind, the owner,
+agent and server, the asset and the policy instance. It prints each comparison and the state that it read: the
+configuration revision, the pause flag, the installed params and the counters (`spentTotal`, `spentDaily`,
+`spentDay`, `calls` and `nonce`). `countersFrom` is `ledger` when the wallet records its usage and `server` when the
+server records it. The command exits 0 when every comparison matches and 5 when the ledger differs from the
+document, for example when `WALLET` is the document from before an update.
 
 ## Owner capabilities and native policy binding
 

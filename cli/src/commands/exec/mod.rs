@@ -145,6 +145,8 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
         wait: a.wait,
         build_only,
         wallet: binding.wallet.clone(),
+        // This command pays no seller challenge.
+        paid_service: None,
     };
     cx.out.detail(format!(
         "wallet  {}",

@@ -14,6 +14,11 @@ Commands:
   fund          Fund the selected policy wallet
   activate      Approve exact policy source and parameters
   export        Verify and cache the active public profile
+  params        Show or change the typed values of an unsigned draft
+  revise        Revise an unsigned draft in the owner's words; prints the next draft
+  update        Change values of an active wallet with one owner signature; usage and nonce stay
+  verify        Compare a wallet document with the ledger and read the wallet state back
+  export-pair   Print what the server evaluates and what the wallet enforces for a policy
   kinds         List the wallet kinds of the selected rail: what enforces the policy and what holds
                 the funds
   generate      Generate a portable draft through the owner-authenticated server; does not deploy or

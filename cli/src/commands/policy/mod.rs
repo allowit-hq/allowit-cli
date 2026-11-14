@@ -3,6 +3,7 @@ mod check;
 mod generate;
 mod kinds;
 mod owner;
+mod params;
 mod show;
 use crate::{ctx::Ctx, error::Result};
 use clap::Subcommand;
@@ -22,6 +23,14 @@ pub(crate) enum Command {
     Activate(owner::Activate),
     /// Verify and cache the active public profile
     Export(owner::Export),
+    #[command(subcommand, before_help=params::EXAMPLES)]
+    Params(params::Command),
+    Revise(params::Revise),
+    #[command(before_help=params::UPDATE_EXAMPLES)]
+    Update(params::Update),
+    #[command(before_help=params::VERIFY_EXAMPLES)]
+    Verify(params::Verify),
+    ExportPair(params::ExportPair),
     #[command(before_help=kinds::EXAMPLES)]
     Kinds(kinds::Args),
     #[command(before_help=generate::EXAMPLES)]
@@ -38,6 +47,11 @@ pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Fund(a) => owner::fund(a, cx),
         Command::Activate(a) => owner::activate(a, cx),
         Command::Export(a) => owner::export(a, cx),
+        Command::Params(c) => params::run(c, cx),
+        Command::Revise(a) => params::revise(a, cx),
+        Command::Update(a) => params::update(a, cx),
+        Command::Verify(a) => params::verify(a, cx),
+        Command::ExportPair(a) => params::export_pair(a, cx),
         Command::Kinds(a) => kinds::run(a, cx),
         Command::Generate(a) => generate::run(a, cx),
         Command::Show(a) => show::run(a, cx),

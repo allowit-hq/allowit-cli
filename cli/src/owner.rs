@@ -50,10 +50,19 @@ pub(crate) fn signer(cx: &mut Ctx, name: &str) -> Result<LocalSigner> {
 }
 pub(crate) fn load(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
     let rail = cx.rail()?;
-    let signer = signer(cx, name)?;
     let rpc = cx.rpc_url(rail)?.filter(|v| !v.is_empty()).ok_or_else(|| {
         Error::config("Select an independent RPC endpoint with --rpc-url or the rail settings")
     })?;
+    with_rpc(cx, name, rpc)
+}
+/// The owner of a command that reads and writes only the server, such as an edit of an
+/// unsigned draft. It needs no RPC endpoint.
+pub(crate) fn load_for_server(cx: &mut Ctx, name: &str) -> Result<LocalOwner> {
+    with_rpc(cx, name, String::new())
+}
+fn with_rpc(cx: &mut Ctx, name: &str, rpc: String) -> Result<LocalOwner> {
+    let rail = cx.rail()?;
+    let signer = signer(cx, name)?;
     Ok(LocalOwner {
         network: rail.id,
         rpc,
