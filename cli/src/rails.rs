@@ -386,7 +386,7 @@ impl Rail {
             )?);
             return Ok(0);
         }
-        let lookup = self.charge_lookup(cx, &binding, None);
+        let lookup = self.charge_lookup(cx, &binding, None, &r.request_id);
         let (mut out, payment) = match self.exec_outcome(cx, r, binding) {
             Ok(result) => result,
             Err(error) => {
@@ -401,20 +401,29 @@ impl Rail {
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
     }
-    /// Where the charge of a request under `binding` is read: the server of
-    /// its profile, else `backend`, else `ALLOWIT_URL` or the production
-    /// server; and its policy.
+    /// Where the charge of the request `id` under `binding` is read: the
+    /// server of its profile; for a retained request without a profile, the
+    /// origin that the journal keeps for it (`backend`, or the journal entry
+    /// of `id`); else `ALLOWIT_URL` or the production server. And its policy.
     pub(crate) fn charge_lookup(
         &self,
-        cx: &Ctx,
+        cx: &mut Ctx,
         binding: &Binding,
         backend: Option<&str>,
+        id: &str,
     ) -> crate::credits::Lookup {
         let origin = binding
             .profile
             .as_ref()
             .map(|profile| profile.server_origin().to_owned())
             .or_else(|| backend.map(str::to_owned))
+            .or_else(|| {
+                let dir = cx.dir().ok()?;
+                crate::settings::journal::load(&dir, id)
+                    .ok()
+                    .flatten()?
+                    .server_origin
+            })
             .or_else(|| cx.server_url().ok());
         crate::credits::Lookup::new(origin, binding.policy.clone())
     }
@@ -484,7 +493,7 @@ impl Rail {
         wait: Duration,
         backend: Option<&str>,
     ) -> Result<i32> {
-        let lookup = self.charge_lookup(cx, &binding, backend);
+        let lookup = self.charge_lookup(cx, &binding, backend, id);
         let (mut out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
         lookup.attach(&mut out.document, id);
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);

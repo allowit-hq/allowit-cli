@@ -110,7 +110,12 @@ pub(crate) struct Lookup {
 }
 
 impl Lookup {
+    /// `policy` is the policy of a binding: the policy id, or `id@module digest`.
     pub(crate) fn new(origin: Option<String>, policy: Option<String>) -> Self {
+        let policy = policy.map(|policy| match policy.split_once('@') {
+            Some((id, _)) => id.to_owned(),
+            None => policy,
+        });
         Self { origin, policy }
     }
     /// The charge of `request`, when the server holds one. It is a read
@@ -269,5 +274,8 @@ mod tests {
             Some("Xg7IxRXCr2MhVdRrTFoYKeAw".into()),
         );
         assert!(lookup.read("bad id").is_none());
+        // A binding names its policy with the module digest: the lookup asks by the policy id.
+        let bound = Lookup::new(None, Some("Xg7IxRXCr2MhVdRrTFoYKeAw@0123abcd".into()));
+        assert_eq!(bound.policy.as_deref(), Some("Xg7IxRXCr2MhVdRrTFoYKeAw"));
     }
 }

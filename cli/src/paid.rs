@@ -207,7 +207,7 @@ fn pay(
         cx,
     )?;
     let adapter = planned.adapter;
-    let lookup = adapter.charge_lookup(cx, &planned.binding, None);
+    let lookup = adapter.charge_lookup(cx, &planned.binding, None, &request_id);
     let result = adapter.exec_outcome(cx, &planned.request, planned.binding);
     let code = match &result {
         Ok((outcome, _)) => exit::execution_status(outcome.status.clone()).code(),
@@ -230,7 +230,13 @@ fn pay(
             let (outcome, payment) = adapter.status_outcome(cx, &original, binding, wait, None)?;
             (outcome, payment, original)
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            // A denied payment was evaluated: its error shows what that cost the owner.
+            if crate::credits::charged_denial(&error) {
+                cx.out.credits = lookup.read(&request_id);
+            }
+            return Err(error);
+        }
     };
     if outcome.status != Status::Confirmed {
         let mut error = Error::uncertain(format!(
