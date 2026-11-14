@@ -152,15 +152,17 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
             .map_err(|_| Error::usage(format!("cannot write {}", out.display())))?;
     }
     cx.out.progress("Handing the wallet code to the server");
-    custom_build::submit(&server, &a.policy_id, &ticket, &built)?;
+    let submitted = custom_build::submit(&server, &a.policy_id, &ticket, &built)?;
+    // The server reports a build that the owner attested before: the same code needs no second
+    // signature.
     let attested = match &local {
-        Some((signer, _, _)) => {
+        Some((signer, _, _)) if !submitted.attested => {
             cx.confirm("Attest this build as the owner of the policy")?;
             let attestation =
                 custom_build::attest(signer, &admission.presignature, &built.code_hash)?;
             custom_build::register(&server, &a.policy_id, &ticket, &attestation)?.attested
         }
-        None => false,
+        _ => submitted.attested,
     };
     let next = if attested {
         "deploy the wallet"
