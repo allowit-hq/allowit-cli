@@ -36,6 +36,13 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
                     "this policy is not active yet; run allowit {id} help"
                 ))
             })?;
+            // The answer must be the profile of the policy that was asked for: the checks
+            // below prove the server and the chain state of a profile, not which policy it is.
+            if profile["policyId"].as_str() != Some(id.as_str()) {
+                return Err(Error::uncertain(
+                    "The server returned the profile of another policy",
+                ));
+            }
             serde_json::to_vec(&profile).map_err(|_| Error::config("Cannot encode the profile"))?
         }
         (None, None) => return Err(Error::usage("name a profile file or --policy POLICY_ID")),

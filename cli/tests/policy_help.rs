@@ -445,6 +445,27 @@ fn rail_use_keeps_the_endpoint_and_wallet_import_reads_the_profile_of_a_policy()
             "{}",
             stderr(&output)
         );
+        // A profile of another policy than the requested one is refused before any import.
+        let mock = Mock::new();
+        sandbox.set("ALLOWIT_URL", &mock.url);
+        sandbox.ok(&["rail", "trust", &mock.url, &rail.account(13).0]);
+        let listener = mock.listener;
+        let mut other = facts(net, "active");
+        other["profile"] = json!({"policyId": "another-policy-id", "network": net});
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let _ = common::read_request(&mut conn);
+            common::reply(&mut conn, 200, &other);
+        });
+        let output = sandbox.run(&["wallet", "import", "--policy", ID]);
+        server.join().unwrap();
+        assert_eq!(code(&output), Some(5), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("profile of another policy"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(!sandbox.config().join("public-profiles").exists());
         // A file and a policy id together, or neither, are usage errors.
         let output = sandbox.run(&["wallet", "import", "profile.json", "--policy", ID]);
         assert_eq!(code(&output), Some(2));
