@@ -173,6 +173,11 @@ pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
     Ok((origin, facts))
 }
 
+/// The server key that this command prints is the server's own claim. Text and JSON output
+/// both carry this sentence before the `rail trust` command.
+const SERVER_KEY_CHECK: &str =
+    "The owner sees the server key in the app under Agent access. If the two differ, stop.";
+
 /// One step: a title and its commands.
 struct Step {
     title: &'static str,
@@ -285,7 +290,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         if implicit {
             command.to_owned()
         } else {
-            format!("ALLOWIT_URL={origin} {command}")
+            // An IPv6 origin has brackets: the value is one quoted shell word.
+            format!("ALLOWIT_URL={} {command}", shell_quote(&origin))
         }
     };
     let again = with_url(&format!("{cli} {} help", args.id));
@@ -392,7 +398,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         note: endpoint_note,
                         commands: vec![
                             select,
-                            format!("{cli} rail trust {origin} {server_key}"),
+                            format!("{cli} rail trust {} {server_key}", shell_quote(&origin)),
                             format!("{cli} keys use {name}"),
                             // The attached form: an id can start with a hyphen.
                             with_url(&format!("{cli} wallet import --policy={}", args.id)),
@@ -471,6 +477,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             "agentPublicKey": agent_key,
             "localKey": local,
             "serverPublicKey": server_key,
+            "serverKeyCheck": server_key.as_ref().map(|_| SERVER_KEY_CHECK),
             "steps": steps.iter().map(|step| json!({"title": step.title, "note": step.note, "commands": step.commands})).collect::<Vec<_>>(),
             "examples": examples.iter().map(|(name, command)| (name.to_string(), json!(command))).collect::<serde_json::Map<_, _>>(),
             "limits": limits.iter().map(|(key, label, value)| json!({"key": key, "label": label, "value": value})).collect::<Vec<_>>(),
@@ -512,9 +519,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     out.stdout.push_str(&crate::term::render(&rows));
     if server_key.is_some() {
-        out.line(
-            "The owner sees the server key in the app under Agent access. If the two differ, stop.",
-        );
+        out.line(SERVER_KEY_CHECK);
     }
     for step in &steps {
         out.line("");

@@ -291,6 +291,17 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
         );
         let import = sandbox.run(&["wallet", "import", &format!("--policy={hyphen}")]);
         assert_ne!(code(&import), Some(2), "{}", stderr(&import));
+        // The JSON form carries the owner's check of the server key too.
+        let (output, _) = served(
+            &mut sandbox,
+            &["--json", ID, "help"],
+            vec![(200, body.clone())],
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value["serverKeyCheck"],
+            "The owner sees the server key in the app under Agent access. If the two differ, stop."
+        );
         // An IPv6 endpoint is one quoted shell word.
         let mut v6 = body.clone();
         v6["endpoint"] = json!("https://[2001:db8::1]:8443/rpc");
