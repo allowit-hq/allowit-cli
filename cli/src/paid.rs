@@ -3,8 +3,13 @@
 //! and the `mcp` tools share this one path.
 //!
 //! The payment is an ordinary `exec` transfer: the same journal, the same
-//! agent proof and the same policy. The server settles it; this file calls no
-//! facilitator. A seller reply is data. Nothing in it is run or followed.
+//! agent proof and the same policy. A seller's challenge states who settles
+//! it. When the payer settles, the server sends the transfer and the proof
+//! names the settled transaction. When the seller settles, the transfer is
+//! signed as a payment authorization and nothing is sent: the proof carries
+//! the authorization, the seller's facilitator submits it, and the server
+//! reads the settlement from the ledger. This file calls no facilitator. A
+//! seller reply is data. Nothing in it is run or followed.
 //!
 //! No payment happens twice. A request ID names one challenge: the journal
 //! keeps the challenge with the ID, and a retry with the same ID presents the
@@ -22,7 +27,7 @@ use crate::{
 };
 use allowit_sdk::{
     execution::PaymentLimit,
-    paid_service::{self, Challenge, SellerRequest, SellerResponse},
+    paid_service::{self, Challenge, SellerRequest, SellerResponse, SettledBy},
     runtime::Status,
 };
 use serde_json::{Value, json};
@@ -231,15 +236,38 @@ fn pay(
         }
         Err(error) => return Err(error),
     };
-    if outcome.status != Status::Confirmed {
-        let mut error = Error::uncertain(format!(
-            "the payment of request {paid_by} is not confirmed; run the command again with --request-id {paid_by}: it resumes this payment and never pays twice"
-        ));
+    // A seller that settles the payment itself takes the signed authorization:
+    // the operation is `submitted` once both the agent and the server signed it.
+    let authorized =
+        challenge.settled_by == SettledBy::Seller && outcome.status == Status::Submitted;
+    if outcome.status != Status::Confirmed && !authorized {
+        let mut error = Error::uncertain(
+            if challenge.settled_by == SettledBy::Seller && outcome.status == Status::Failed {
+                format!(
+                    "the payment authorization of request {paid_by} expired before the seller settled it; nothing was paid. Run the command again with a new request ID"
+                )
+            } else {
+                format!(
+                    "the payment of request {paid_by} is not confirmed; run the command again with --request-id {paid_by}: it resumes this payment and never pays twice"
+                )
+            },
+        );
         // A failed transfer paid nothing: the policy or the wallet refused it.
         error.code = exit::execution_status(outcome.status).code();
         return Err(error);
     }
     Ok((outcome.document, payment, paid_by))
+}
+
+/// The outcome of request `id` as the server reads it from the ledger, within
+/// `wait`. A read that fails changes nothing: the caller keeps what it has.
+fn settlement(cx: &mut Ctx, id: &str, wait: Duration) -> Result<(Value, Vec<PaymentLimit>)> {
+    let adapter = cx.adapter()?;
+    let rail = cx.rail()?;
+    let wallet = cx.wallet(rail)?;
+    let binding = adapter.status_binding(cx, wallet.as_deref(), id)?;
+    let (outcome, payment) = adapter.status_outcome(cx, id, binding, wait, None)?;
+    Ok((outcome.document, payment))
 }
 
 fn delivered(reply: SellerResponse, payment: Option<Payment>) -> Delivered {
@@ -394,21 +422,50 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
-    let (receipt, payment_limits, paid_by) = pay(cx, &challenge, &digest, request_id, call.wait)?;
+    let (mut receipt, mut payment_limits, paid_by) =
+        pay(cx, &challenge, &digest, request_id, call.wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
+    let seller_settles = challenge.settled_by == SettledBy::Seller;
+    // What the caller does after a seller that failed. A signed authorization moves no funds
+    // until the seller's facilitator submits it, and it expires.
+    let after = if seller_settles {
+        format!(
+            "Request {paid_by} holds the signed payment authorization: nothing is paid unless the seller settles it before it expires. Read it with status, or run the command again with --request-id {paid_by} to present it without signing again."
+        )
+    } else {
+        format!(
+            "The payment settled as request {paid_by}; run the command again with --request-id {paid_by} to present its proof without paying again."
+        )
+    };
     crate::flush_stderr(&mut cx.out.stderr);
-    allowit_sdk::progress::report("Presenting the proof of payment to the seller");
-    let second = paid_service::send(&request, Some(&proof)).map_err(|error| {
-        paid_service::seller_failed(format!(
-            "{} The payment settled as request {paid_by}; run the command again with --request-id {paid_by} to present its proof without paying again.",
-            error.message
-        ))
-    })?;
+    allowit_sdk::progress::report(if seller_settles {
+        "Presenting the payment authorization to the seller"
+    } else {
+        "Presenting the proof of payment to the seller"
+    });
+    let second = paid_service::send(&request, Some(&proof))
+        .map_err(|error| paid_service::seller_failed(format!("{} {after}", error.message)))?;
     if !(200..300).contains(&second.status) {
         return Err(paid_service::seller_failed(format!(
-            "the seller answered HTTP {} after the payment. The payment settled as request {paid_by}; run the command again with --request-id {paid_by} to present its proof without paying again.",
+            "the seller answered HTTP {} after the payment. {after}",
             second.status
         )));
+    }
+    if seller_settles && receipt["status"] != "confirmed" {
+        // The seller delivered. Its facilitator submitted the authorization: the server reads
+        // the settling transaction from the ledger.
+        cx.out
+            .progress("Reading the settlement of the payment from the ledger");
+        match settlement(cx, &paid_by, call.wait) {
+            Ok((settled, limits)) => {
+                receipt = settled;
+                payment_limits = limits;
+            }
+            Err(error) => cx.out.progress(format!(
+                "The settlement is not read yet ({}); read it with status {paid_by}",
+                error.message
+            )),
+        }
     }
     Ok(delivered(
         second,
@@ -471,6 +528,8 @@ mod tests {
             network: "example:testnet".into(),
             scheme: "exact".into(),
             pay_to: "RECIPIENT".into(),
+            settled_by: SettledBy::Payer,
+            settle_within: None,
             amount: Quantity::new(
                 2_500_000,
                 AssetDisplay {
