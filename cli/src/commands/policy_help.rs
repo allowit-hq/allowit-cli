@@ -296,21 +296,53 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let mut next = None;
     match state {
         "awaiting_agent_key" => {
-            let mut commands = vec![
-                select,
-                format!("{cli} keys generate agent"),
-                format!("{cli} keys use agent"),
-            ];
+            // A device that already holds a key named `agent` for this kind of rail uses it:
+            // `keys generate` refuses an existing name. A name of another rail family stays
+            // untouched, and the new key takes the first unused name.
+            let dir = cx.dir()?;
+            let (existing, _) = keys::list(&dir)?;
+            let reuse = existing
+                .iter()
+                .find(|key| key.name == "agent" && key.secret && key.check_rail(rail.id).is_ok());
+            let name = match reuse {
+                Some(key) => key.name.clone(),
+                None => (1..)
+                    .map(|n| {
+                        if n == 1 {
+                            "agent".to_owned()
+                        } else {
+                            format!("agent-{n}")
+                        }
+                    })
+                    .find(|name| !keys::exists(&dir, name))
+                    .unwrap_or_else(|| "agent".into()),
+            };
+            let mut commands = vec![select];
+            if reuse.is_none() {
+                commands.push(format!("{cli} keys generate {name}"));
+            }
+            commands.push(format!("{cli} keys use {name}"));
             if rail.testnet {
-                commands.push(format!("{cli} keys fund agent"));
+                commands.push(format!("{cli} keys fund {name}"));
             }
             steps.push(Step {
-                title: "Make your key",
+                title: if reuse.is_some() {
+                    "Use your key"
+                } else {
+                    "Make your key"
+                },
                 note: endpoint_note,
                 commands,
             });
+            let public = match reuse {
+                Some(key) => format!(
+                    "Tell the owner your public key: {}.",
+                    shell_safe(&key.address, 128)?
+                ),
+                None => "Tell the owner the `address` that `keys generate` printed: it is your public key.".to_owned(),
+            };
             next = Some(format!(
-                "Tell the owner the `address` that `keys generate` printed: it is your public key. {}Then wait. When the owner has signed, run: {again}",
+                "{public} {}Then wait. When the owner has signed, run: {again}",
                 if rail.testnet {
                     "`keys fund` creates your account on the test network; it must exist before the owner signs. "
                 } else {
@@ -379,11 +411,18 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         .filter(|to| address::check_account(rail.family, to).is_ok())
                         .and_then(|to| shell_safe(to, 128).ok())
                         .unwrap_or_else(|| "DESTINATION".into());
+                    // `--wallet` or `ALLOWIT_WALLET` of this call outranks the wallet that
+                    // `wallet use` saves. When it names another wallet, the payment names the
+                    // policy wallet.
+                    let pay = match &cx.global.wallet {
+                        Some(named) if named != wallet => format!("{cli} --wallet {wallet}"),
+                        _ => cli.clone(),
+                    };
                     examples = vec![
                         (
                             "pay",
                             with_url(&format!(
-                                "{cli} exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
+                                "{pay} exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
                             )),
                         ),
                         (

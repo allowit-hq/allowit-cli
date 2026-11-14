@@ -92,7 +92,11 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
             assert!(!text.contains(absent), "{absent} in\n{text}");
         }
         // The same as data.
-        let (output, _) = served(&mut sandbox, &["--json", ID, "help"], vec![(200, body)]);
+        let (output, _) = served(
+            &mut sandbox,
+            &["--json", ID, "help"],
+            vec![(200, body.clone())],
+        );
         assert_eq!(code(&output), Some(0), "{}", stderr(&output));
         assert!(output.stderr.is_empty(), "{}", stderr(&output));
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -109,6 +113,30 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
         // The command changed no setting and made no key.
         assert!(!sandbox.config().join("config.toml").exists());
         assert!(!sandbox.config().join("secrets").exists());
+        // A device that already holds a key named `agent` on this rail uses it: no second
+        // `keys generate agent`, and the public key is named.
+        sandbox.ok(&["rail", "use", net]);
+        let held = sandbox.json(&["keys", "generate", "agent"])["address"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (output, _) = served(&mut sandbox, &["--json", ID, "help"], vec![(200, body)]);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let commands: Vec<&str> = value["steps"][0]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|command| command.as_str().unwrap())
+            .collect();
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("keys generate")),
+            "{commands:?}"
+        );
+        assert!(commands.contains(&"allowit keys use agent"), "{commands:?}");
+        assert!(value["next"].as_str().unwrap().contains(&held), "{value}");
     });
 }
 
@@ -263,6 +291,25 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
         );
         let import = sandbox.run(&["wallet", "import", &format!("--policy={hyphen}")]);
         assert_ne!(code(&import), Some(2), "{}", stderr(&import));
+        // A wallet named for this call that is not the policy wallet: the payment names the
+        // policy wallet, which outranks the environment.
+        sandbox.set("ALLOWIT_WALLET", &rail.fixtures.account);
+        let (output, _) = served(
+            &mut sandbox,
+            &["--json", ID, "help"],
+            vec![(200, body.clone())],
+        );
+        if code(&output) == Some(0) {
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(
+                value["examples"]["pay"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("allowit --wallet {wallet} exec ")),
+                "{value}"
+            );
+        }
+        sandbox.set("ALLOWIT_WALLET", "");
         // A device without the agent's key gets no setup and no payment command.
         let mut other = Sandbox::new("policy-help-other-device");
         let (output, _) = served(

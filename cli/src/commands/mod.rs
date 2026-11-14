@@ -166,6 +166,14 @@ pub(crate) enum Command {
     PolicyHelp(policy_help::Args),
 }
 
+/// True for combined boolean short flags, such as `-qv`.
+fn short_cluster(token: &str) -> bool {
+    token.len() > 2
+        && token.len() <= 4
+        && token.starts_with('-')
+        && token[1..].chars().all(|c| matches!(c, 'y' | 'q' | 'v'))
+}
+
 /// Rewrites `allowit [FLAGS] POLICY_ID help` to the hidden `policy-help`
 /// command. The owner copies that line from the app, so the policy id is the
 /// first word. A word that is a command name is never an id, and an id can
@@ -191,6 +199,15 @@ pub(crate) fn policy_help_argv(argv: &[String]) -> Option<Vec<String>> {
                 .iter()
                 .any(|flag| token.starts_with(&format!("{flag}=")))
         {
+            at += 1;
+        } else if short_cluster(token)
+            || (token.starts_with("-n")
+                && token.len() > 2
+                // An id can start with `-n` too: before `help` it is the id.
+                && !(policy_help::is_policy_id(token)
+                    && argv.get(at + 1).map(String::as_str) == Some("help")))
+        {
+            // `-qv`, or `-nRAIL` with its value attached.
             at += 1;
         } else {
             break;
@@ -606,6 +623,16 @@ mod tests {
             (
                 "-1WagPbql_eK8CwzC4dxHJDMtC5wilVg help".to_owned(),
                 "policy-help --id=-1WagPbql_eK8CwzC4dxHJDMtC5wilVg".to_owned(),
+            ),
+            // Also with the letter of a short value flag.
+            (
+                "-nWagPbql_eK8CwzC4dxHJDMtC5wilVg help".to_owned(),
+                "policy-help --id=-nWagPbql_eK8CwzC4dxHJDMtC5wilVg".to_owned(),
+            ),
+            // Short flags in their attached and combined forms.
+            (
+                format!("-nexample:testnet -qy {id} help"),
+                format!("-nexample:testnet -qy policy-help --id={id}"),
             ),
         ] {
             assert_eq!(
