@@ -18,6 +18,11 @@ pub(crate) enum Exit {
     Replayed = 6,
     /// The network did not answer: retry with the same request ID.
     NetworkUnavailable = 7,
+    /// The seller of a paid call refused, failed or sent no usable challenge
+    /// or resource. It is no payment error and no policy denial.
+    Seller = 8,
+    /// The seller's price is above `--max-price`. Nothing was paid.
+    PriceExceeded = 9,
     OwnerSignature = 10,
     OwnerInput = 11,
     Pending = 12,
@@ -46,6 +51,14 @@ pub(crate) const TABLE: &[(Exit, &str)] = &[
         Exit::NetworkUnavailable,
         "network unavailable: retry with the same request ID",
     ),
+    (
+        Exit::Seller,
+        "the seller refused, failed or sent no usable challenge or resource",
+    ),
+    (
+        Exit::PriceExceeded,
+        "the seller's price is above --max-price: nothing was paid",
+    ),
     (Exit::OwnerSignature, "owner signature needed"),
     (Exit::OwnerInput, "waiting for owner input"),
     (Exit::Pending, "pending"),
@@ -68,6 +81,8 @@ impl Exit {
             Exit::Uncertain => "uncertain",
             Exit::Replayed => "replayed",
             Exit::NetworkUnavailable => allowit_sdk::transport_failure::NETWORK_UNAVAILABLE_NAME,
+            Exit::Seller => allowit_sdk::paid_service::SELLER_FAILED_NAME,
+            Exit::PriceExceeded => "price_exceeded",
             Exit::OwnerSignature => "owner_signature",
             Exit::OwnerInput => "owner_input",
             Exit::Pending => "pending",
@@ -93,6 +108,13 @@ pub(crate) fn execution_status(status: allowit_sdk::runtime::Status) -> Exit {
         Status::SubmissionUnknown => Exit::Uncertain,
         Status::Prepared | Status::Submitted => Exit::Pending,
     }
+}
+
+/// The error for a seller's price above the caller's bound. Nothing was paid.
+pub(crate) fn price_exceeded(message: impl Into<String>) -> Error {
+    let mut error = Error::usage(message);
+    error.code = Exit::PriceExceeded.code();
+    error
 }
 
 /// The error for a verb whose backend is not ready on this rail.
@@ -129,6 +151,26 @@ mod tests {
         assert_eq!((exit.code(), exit.name()), (7, "network_unavailable"));
         assert_ne!(exit, Exit::Config);
         assert_ne!(exit, Exit::Rejected);
+    }
+    #[test]
+    fn a_seller_failure_and_a_price_above_the_bound_have_their_own_exit_codes() {
+        let seller = allowit_sdk::paid_service::seller_failed("the seller answered HTTP 500");
+        assert_eq!(Exit::from_code(seller.code), Exit::Seller);
+        assert_eq!(
+            (Exit::Seller.code(), Exit::Seller.name()),
+            (8, "seller_failed")
+        );
+        let price = price_exceeded("the price is above --max-price");
+        assert_eq!(Exit::from_code(price.code), Exit::PriceExceeded);
+        assert_eq!(
+            (Exit::PriceExceeded.code(), Exit::PriceExceeded.name()),
+            (9, "price_exceeded")
+        );
+        // Neither is a policy denial, a payment rejection or a usage error.
+        for other in [Exit::Denied, Exit::Rejected, Exit::Usage, Exit::Uncertain] {
+            assert_ne!(Exit::Seller, other);
+            assert_ne!(Exit::PriceExceeded, other);
+        }
     }
     #[test]
     fn table_codes_are_unique_and_round_trip() {

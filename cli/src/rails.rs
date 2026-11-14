@@ -372,6 +372,36 @@ impl Rail {
         allowit_sdk::execution::check(self.0.id, op, to, token_out, args.is_some())
     }
     pub(crate) fn exec(&self, cx: &mut Ctx, r: &ExecRequest, binding: Binding) -> Result<i32> {
+        if r.build_only && binding.recovery.is_none() {
+            let root = cx.dir()?;
+            let p = binding.profile.ok_or_else(|| {
+                crate::error::Error::config("Execution has no resolved verified profile")
+            })?;
+            let rpc = cx.rpc_url(self.0)?;
+            cx.out.value(&allowit_sdk::execution::build(
+                &p,
+                &root,
+                rpc.as_deref(),
+                r,
+            )?);
+            return Ok(0);
+        }
+        let (out, payment) = self.exec_outcome(cx, r, binding)?;
+        crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
+        Ok(crate::exit::execution_status(out.status).code())
+    }
+    /// Sends one request and returns its outcome with the per-payment limits
+    /// of its profile, and prints nothing. `exec` prints the receipt; a paid
+    /// call reads it to build the proof.
+    pub(crate) fn exec_outcome(
+        &self,
+        cx: &mut Ctx,
+        r: &ExecRequest,
+        binding: Binding,
+    ) -> Result<(
+        allowit_sdk::execution::Outcome,
+        Vec<allowit_sdk::execution::PaymentLimit>,
+    )> {
         let root = cx.dir()?;
         if let Some(recovery) = binding.recovery {
             if r.build_only {
@@ -401,28 +431,22 @@ impl Rail {
                 r.wait,
                 Some(r),
             )?;
-            crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
-            return Ok(crate::exit::execution_status(out.status).code());
+            return Ok((out, payment));
         }
         let p = binding.profile.ok_or_else(|| {
             crate::error::Error::config("Execution has no resolved verified profile")
         })?;
         let rpc = cx.rpc_url(self.0)?;
         if r.build_only {
-            cx.out.value(&allowit_sdk::execution::build(
-                &p,
-                &root,
-                rpc.as_deref(),
-                r,
-            )?);
-            return Ok(0);
+            return Err(crate::error::Error::usage(
+                "A built request has no outcome to read",
+            ));
         }
         let signer = self.signer(cx)?;
         let payment = Self::payment_limits(&p);
         crate::flush_stderr(&mut cx.out.stderr);
         let out = allowit_sdk::execution::execute(p, signer, &root, rpc, r)?;
-        crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
-        Ok(crate::exit::execution_status(out.status).code())
+        Ok((out, payment))
     }
     pub(crate) fn status(
         &self,
@@ -432,6 +456,22 @@ impl Rail {
         wait: Duration,
         backend: Option<&str>,
     ) -> Result<i32> {
+        let (out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
+        crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
+        Ok(crate::exit::execution_status(out.status).code())
+    }
+    /// Reads one request and returns its outcome, and prints nothing.
+    pub(crate) fn status_outcome(
+        &self,
+        cx: &mut Ctx,
+        id: &str,
+        binding: Binding,
+        wait: Duration,
+        backend: Option<&str>,
+    ) -> Result<(
+        allowit_sdk::execution::Outcome,
+        Vec<allowit_sdk::execution::PaymentLimit>,
+    )> {
         let signer = self.signer(cx)?;
         let root = cx.dir()?;
         let payment = match &binding.profile {
@@ -455,7 +495,6 @@ impl Rail {
             crate::flush_stderr(&mut cx.out.stderr);
             allowit_sdk::execution::status(p, signer, &root, rpc, id, wait)?
         };
-        crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
-        Ok(crate::exit::execution_status(out.status).code())
+        Ok((out, payment))
     }
 }

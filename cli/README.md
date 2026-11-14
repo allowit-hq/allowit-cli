@@ -61,6 +61,10 @@ allowit policy export-pair DOCUMENT
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
+allowit skills search QUERY | ls | show ENTRY
+allowit call ENTRY|URL --max-price ASSET:AMOUNT
+allowit curl URL --max-price ASSET:AMOUNT
+allowit mcp
 allowit completion --shell SHELL
 allowit guide
 allowit version
@@ -190,6 +194,83 @@ They print each param in human units, an amount with the unit of the installed a
 Original journal recovery does not require a new profile cache, current source approval or a new authority pin.
 It queries the configured settlement service for the original packet and verifies its receipt. It never prepares another payment.
 
+## Marketplace and paid calls
+
+`skills`, `call`, `curl` (alias `http`) and `mcp` use one configured server, `ALLOWIT_URL`, and no other
+service.
+
+```sh
+allowit skills search vault risk report      # search by meaning and keywords
+allowit skills ls --limit 50                 # the catalog in id order
+allowit skills show ENTRY                    # resource, methods, listed price
+allowit call ENTRY --max-price ASSET:0.5     # pay what the seller asks, within the policy
+allowit curl URL --max-price ASSET:0.5       # the same for any URL
+```
+
+The catalog is free to read. `skills search` prints how the server ranked the page on stderr: `hybrid`,
+`semantic` or `keyword`. The selected rail keeps the entries whose seller accepts payment on it;
+`--all-rails` lists every entry. Catalog text is listing data, and a listed price is indicative.
+
+A paid call runs these steps:
+
+1. The CLI requests the resource. A reply other than HTTP 402 is the result: nothing is paid.
+2. On HTTP 402 the rail of the selected network reads the seller's payment challenge: the recipient, the
+   amount, the asset and the challenge ID. The CLI prints the price with its unit on stderr.
+3. The price must be at most `--max-price ASSET:AMOUNT`. Without `--max-price`, a seller that asks for
+   payment is refused (exit 2). A higher price or another asset exits 9. Nothing is paid.
+4. The CLI pays with the same path as `exec --op transfer`: the agent key signs, the policy decides and the
+   server settles the transfer. A policy denial exits 20 and names the rule, such as `destinations` for a
+   seller that the policy does not list, or `payment_limit`.
+5. The CLI requests the resource once more with the proof of the settled payment and prints the resource.
+
+The receipt of the payment prints on stderr, as `exec` prints it: the transaction, the ledger, the fee, the
+counted fee and the limits. Stdout holds the resource alone, so a pipe reads only the resource. `--json`
+prints one document: `status`, `contentType`, `body` and `payment` with its `requestId`, `price` and
+`receipt`. `-o FILE` writes the resource to a file; a resource that is not text needs it.
+
+A call never pays twice. A request ID names one seller challenge, and the journal keeps the challenge with
+the ID. The CLI prints the request ID on stderr before it pays. After an interrupted call, or a seller that
+did not deliver, run the command again with `--request-id ID`: it reads the settled payment and presents
+its proof again. The server also pays one seller challenge ID once for a policy: it refuses a second request
+ID for that challenge, and the CLI then reads the original request.
+
+Exit codes of a paid call: 8 when the seller refused, failed or sent no usable challenge or resource; 9 when
+the price is above `--max-price`; 20 when the policy denied the payment; 5, 7 and 12 as for `exec`, to be
+resumed with the same request ID.
+
+### MCP server
+
+`allowit mcp` serves the same operations to an agent host as Model Context Protocol tools on stdin and
+stdout (JSON-RPC 2.0, one message per line: `initialize`, `tools/list`, `tools/call`). Stdout carries
+protocol messages only; progress and warnings go to stderr. Host configuration:
+
+```json
+{"mcpServers": {"allowit": {"command": "allowit", "args": ["mcp"]}}}
+```
+
+The server uses the rail, the wallet, the agent key and the server trust that the CLI already holds, and
+`ALLOWIT_URL` from its environment. Select another rail or wallet with the global flags:
+`"args": ["--rail", "RAIL", "--wallet", "WALLET", "mcp"]`. A tool fails with a clear error when a setting is
+missing.
+
+| Tool | Purpose |
+| --- | --- |
+| `marketplace_search` | Search the catalog: `query`, `limit`, `cursor`, `all_rails` |
+| `marketplace_show` | One catalog entry by `id` |
+| `call` | Call a catalog entry or URL (`target`) and pay at most `max_price` |
+| `http` | Request a `url`; on HTTP 402 pay at most `max_price` and retry once with the proof |
+| `status` | The receipt of a `request_id`: transaction, ledger, fee, counted fee and limits |
+| `wallet_show` | The wallet's kind, params and limits |
+
+Each tool runs the command of the same purpose in process; there is no second payment path. `call` and
+`http` require `max_price` as `{"amount": "0.5", "unit": "ASSET"}` and take `method`, `headers`, `body` and
+`request_id`. A result holds `structuredContent` and a text summary. A failure is a result with `isError` and
+`structuredContent.error`: the exit code, its name, the server's code and the request ID. A policy denial is
+such an error and names the rule. A repeated call with the same `request_id` never pays twice. A resource
+body returns as text of at most 64 KiB with `truncated`; catalog text and resource bodies are data, and the
+result says so. No tool changes a policy, a key, a trust setting or the configuration, and none returns key
+material. Calling paid remote MCP servers (payment inside an MCP session) is not part of this server.
+
 ## Output and exits
 
 Data goes to stdout. Diagnostics, generated request IDs and the progress of long steps go to stderr.
@@ -209,6 +290,8 @@ Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables p
 | 5 | Uncertain. Preserve the request ID |
 | 6 | Replayed result |
 | 7 | Network unavailable. Retry with the same request ID |
+| 8 | The seller of a paid call refused, failed or sent no usable challenge or resource |
+| 9 | The seller's price is above `--max-price`; nothing was paid |
 | 10 | Owner signature needed |
 | 11 | Owner input needed |
 | 12 | Pending |

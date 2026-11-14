@@ -31,6 +31,10 @@ pub(crate) struct Entry {
     /// The last exit code, or `None` before the first result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<i32>,
+    /// The seller's challenge that a paid call pays. A retry with the same
+    /// request ID presents the proof of this challenge and never pays another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<allowit_sdk::paid_service::Challenge>,
 }
 
 /// The folder of one request ID.
@@ -86,6 +90,7 @@ pub(crate) fn record(dir: &Path, entry: &Entry) -> Result<()> {
             || old.op != entry.op
             || old.to != entry.to
             || old.amount != entry.amount
+            || old.challenge != entry.challenge
         {
             return Err(Error::usage(format!(
                 "request ID {} already names a different request; use a new --request-id",
@@ -172,6 +177,7 @@ mod tests {
             server_origin: None,
             created_at: at,
             exit: None,
+            challenge: None,
         }
     }
     #[test]

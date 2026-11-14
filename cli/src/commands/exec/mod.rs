@@ -81,9 +81,25 @@ pub(crate) fn check_op(op: &str) -> Result<()> {
     }
 }
 
-/// Validates, builds, journals and sends one `exec` request. Every input
-/// check runs here, once; the rail adapter receives a checked request.
-pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i32> {
+/// One checked and journaled request, ready to send.
+pub(crate) struct Planned {
+    pub adapter: crate::rails::Rail,
+    pub request: ExecRequest,
+    pub binding: crate::rails::Binding,
+    pub dir: std::path::PathBuf,
+}
+
+/// Validates, builds and journals one request. Every input check runs here,
+/// once; the rail adapter receives a checked request. `challenge` is the
+/// seller's challenge that the request pays, when it is a paid call: the
+/// journal keeps it with the request ID and the request carries its context.
+pub(crate) fn plan(
+    a: RequestArgs,
+    build_only: bool,
+    command: &str,
+    challenge: Option<&allowit_sdk::paid_service::Challenge>,
+    cx: &mut Ctx,
+) -> Result<Planned> {
     check_op(&a.op)?;
     let rail = cx.rail()?;
     let adapter = cx.adapter()?;
@@ -145,8 +161,7 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
         wait: a.wait,
         build_only,
         wallet: binding.wallet.clone(),
-        // This command pays no seller challenge.
-        paid_service: None,
+        paid_service: challenge.map(allowit_sdk::paid_service::Challenge::context),
     };
     cx.out.detail(format!(
         "wallet  {}",
@@ -158,7 +173,7 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
             &dir,
             &journal::Entry {
                 request_id: request_id.clone(),
-                command: "exec".into(),
+                command: command.into(),
                 rail: rail.id.into(),
                 wallet: binding.wallet.clone(),
                 policy: binding.policy.clone(),
@@ -169,16 +184,29 @@ pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i
                 exit: None,
                 profile_version: binding.profile.as_ref().map(|p| p.version.clone()),
                 server_origin: binding.profile.as_ref().map(|p| p.server_origin().into()),
+                challenge: challenge.cloned(),
             },
         )?;
     }
-    let result = adapter.exec(cx, &request, binding);
+    Ok(Planned {
+        adapter,
+        request,
+        binding,
+        dir,
+    })
+}
+
+/// Validates, builds, journals and sends one `exec` request, and prints its
+/// receipt.
+pub(crate) fn submit(a: RequestArgs, build_only: bool, cx: &mut Ctx) -> Result<i32> {
+    let planned = plan(a, build_only, "exec", None, cx)?;
+    let result = planned.adapter.exec(cx, &planned.request, planned.binding);
     if !build_only {
         let code = match &result {
             Ok(code) => *code,
             Err(e) => e.code,
         };
-        finish(cx, &dir, &request_id, code);
+        finish(cx, &planned.dir, &planned.request.request_id, code);
     }
     result
 }
@@ -216,6 +244,7 @@ mod tests {
             server_origin: None,
             created_at: 0,
             exit: None,
+            challenge: None,
         };
         journal::record(&dir, &entry).unwrap();
         let held = journal::lock(&dir, "pay-0001").unwrap();

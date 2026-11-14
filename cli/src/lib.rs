@@ -21,6 +21,7 @@ mod ctx;
 mod exit;
 mod kinds;
 mod owner;
+mod paid;
 mod rails;
 mod receipt;
 mod routing;
