@@ -460,6 +460,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
     }
     let rules = [
+        "Pay only when the owner asks, and only that amount. Setting up is not a request, and the commands above are examples: run no payment to test the setup.",
         "Pay only with `allowit exec`: it pays from the policy wallet. Never pay from your own account; it pays only the network fees.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
         "Never print, copy or move a secret key. Never change the policy: only the owner can.",
@@ -533,7 +534,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     if !examples.is_empty() {
         out.line("");
-        out.line("Pay, check the result and list your requests:");
+        out.line("When the owner asks you to pay (examples, not requests):");
         for (_, command) in &examples {
             out.line(format!("  {command}"));
         }

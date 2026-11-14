@@ -48,7 +48,8 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `rail trust ORIGIN KEY`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
-The command changes nothing. It pins no server key and imports no profile: the printed key is the server's own
+Its first rule is that the agent pays only when the owner asks: setting up is not a request, and the printed
+payment is an example. The command changes nothing. It pins no server key and imports no profile: the printed key is the server's own
 claim, and the owner compares it with the key that the app shows under Agent access before the agent runs
 `rail trust`. A device that holds no key for the policy's agent public key gets no setup and no payment command.
 Every server value that enters a printed command is checked: an address of the rail, or a plain URL without a
