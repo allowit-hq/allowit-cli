@@ -287,7 +287,10 @@ allowit --rpc-url URL exec --op transfer --to ADDRESS --amount ASSET:0.2 --reque
 allowit --rpc-url URL --json policy update wallet.json daily_spending_limit 1 --owner-key owner --origin ORIGIN \
   --request-id update-0001 --fee-limit FEE --yes > wallet-2.json
 allowit --rpc-url URL policy verify wallet-2.json --owner-key owner
-allowit --rpc-url URL --json policy export wallet-2.json --owner-key owner --origin ORIGIN --activation-id update-0001
+allowit --rpc-url URL --json policy export wallet-2.json --owner-key owner --origin ORIGIN \
+  --activation-id update-0001 > profile-2.json
+allowit --rpc-url URL wallet import profile-2.json
+allowit wallet use WALLET_ADDRESS --profile VERSION
 ```
 
 `policy params show` prints each param of a draft or wallet document in the unit of its asset.
@@ -308,7 +311,9 @@ the policy has spent. A request that the agent prepared before the update is sta
 Resume an interrupted update with the same `--request-id` and arguments: the CLI sends the saved signed step and
 asks for no second signature. `--expected-revision N` refuses the update when the wallet is at another revision.
 The printed document selects the wallet with its new values, and its request ID exports the updated public profile
-as an activation ID does. A typed server refusal, such as `param_out_of_range` or `update_unavailable`, exits 4.
+as an activation ID does. The profile cache then holds the profile from before the update and the updated one:
+`wallet import` prints the `version` of the updated profile, and the agent selects it with
+`wallet use ADDRESS --profile VERSION`. A typed server refusal, such as `param_out_of_range` or `update_unavailable`, exits 4.
 
 `policy verify` reads the wallet through the owner's RPC, without the server and without a signature. It compares
 `WALLET` with the ledger: the executable, the source binding, the rules, the params, the wallet kind, the owner,

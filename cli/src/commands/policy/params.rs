@@ -159,6 +159,19 @@ fn show(a: Show, cx: &mut Ctx) -> Result<i32> {
     }
     Ok(0)
 }
+/// The exit code of a printed draft: 11 while owner input stays unresolved, as `policy
+/// generate` reports it. The portable binding of the draft lists its unresolved inputs.
+fn draft_code(draft: &Value) -> i32 {
+    let unresolved = draft
+        .pointer("/runtime/instanceBinding/portable/unresolved")
+        .and_then(Value::as_array)
+        .is_some_and(|inputs| !inputs.is_empty());
+    if unresolved {
+        Exit::OwnerInput.code()
+    } else {
+        Exit::Ok.code()
+    }
+}
 /// Print the next draft as `policy generate` prints a draft: in JSON mode stdout is the draft
 /// document, which `policy deploy` reads; text mode prints the changes first.
 fn print_draft(cx: &mut Ctx, network: &str, changes: Vec<Value>, draft: &Value) {
@@ -190,7 +203,8 @@ fn set(a: Set, cx: &mut Ctx) -> Result<i32> {
     let (draft, document) = document(&a.policy_file)?;
     // The values are parsed and checked before any key or network access.
     let (typed, changes) = shared::typed_changes(network, &document, &edits, now()?)?;
-    let local = owner::load(cx, &a.owner_key)?;
+    // A draft edit reaches the server only: it needs no RPC endpoint.
+    let local = owner::load_for_server(cx, &a.owner_key)?;
     crate::flush_stderr(&mut cx.out.stderr);
     let next = shared::edit_params(
         &local.context(&a.origin),
@@ -200,12 +214,12 @@ fn set(a: Set, cx: &mut Ctx) -> Result<i32> {
         },
     )?;
     print_draft(cx, network, change_rows(&changes), &next);
-    Ok(0)
+    Ok(draft_code(&next))
 }
 pub(crate) fn revise(a: Revise, cx: &mut Ctx) -> Result<i32> {
     let network = cx.rail()?.id;
     let (draft, _) = document(&a.policy_file)?;
-    let local = owner::load(cx, &a.owner_key)?;
+    let local = owner::load_for_server(cx, &a.owner_key)?;
     crate::flush_stderr(&mut cx.out.stderr);
     let next = shared::revise(
         &local.context(&a.origin),
@@ -215,7 +229,7 @@ pub(crate) fn revise(a: Revise, cx: &mut Ctx) -> Result<i32> {
         },
     )?;
     print_draft(cx, network, vec![], &next);
-    Ok(0)
+    Ok(draft_code(&next))
 }
 pub(crate) fn update(a: Update, cx: &mut Ctx) -> Result<i32> {
     if !crate::request::request_id_valid(&a.session.request_id) {
@@ -233,7 +247,7 @@ pub(crate) fn update(a: Update, cx: &mut Ctx) -> Result<i32> {
     let (typed, changes) = shared::typed_changes(network, &document, &edits, now()?)?;
     let local = owner::load(cx, &a.session.owner_key)?;
     cx.confirm("Change these values of the installed wallet with the owner account")?;
-    let mut out = shared::update_params(
+    let out = shared::update_params(
         &local.context(&a.session.origin),
         shared::UpdateParams {
             document: &bytes,
@@ -243,14 +257,55 @@ pub(crate) fn update(a: Update, cx: &mut Ctx) -> Result<i32> {
             fee_limit: &a.fee_limit,
         },
     )?;
-    if let Some(fields) = out.as_object_mut() {
-        fields.insert("changes".into(), Value::Array(change_rows(&changes)));
+    // stdout stays the document that selects the wallet with its new values: the next owner
+    // command reads it. The changes print first in text mode, and on stderr with `-v` in JSON
+    // mode, as the review of a draft does.
+    let changes = change_rows(&changes);
+    if cx.out.json {
+        if cx.out.verbose && !cx.out.quiet {
+            cx.out
+                .stderr
+                .push_str(&format!("{}\n", json!({"changes": changes})));
+        }
+    } else {
+        let mut rows = vec![];
+        term::flatten("changes".into(), &Value::Array(changes), &mut rows);
+        cx.out.stdout.push_str(&term::render(&rows));
+        cx.out.line("");
     }
     crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(0)
 }
+/// `document` with every params map that equals `expected` replaced by `observed`. The two
+/// maps come from the `params` comparison of a verification, so the rail prints the installed
+/// values as it prints the document's own.
+fn with_installed_params(document: &Value, expected: &Value, observed: &Value) -> Value {
+    if document == expected {
+        return observed.clone();
+    }
+    match document {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        with_installed_params(value, expected, observed),
+                    )
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| with_installed_params(item, expected, observed))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
 pub(crate) fn verify(a: Verify, cx: &mut Ctx) -> Result<i32> {
-    let (bytes, _) = document(&a.policy_file)?;
+    let network = cx.rail()?.id;
+    let (bytes, document) = document(&a.policy_file)?;
     let local = owner::load(cx, &a.owner_key)?;
     // Verification reads the owner's RPC only. It starts no owner session, so no Origin applies.
     let verification = shared::verify(&local.context(""), &bytes)?;
@@ -300,13 +355,30 @@ pub(crate) fn verify(a: Verify, cx: &mut Ctx) -> Result<i32> {
         fields.remove("params");
     }
     term::flatten("state".into(), &state, &mut rows);
-    for (key, value) in &verification.state.params {
-        rows.push((
-            format!("state.params.{key}"),
-            term::text(&serde_json::to_value(value).unwrap_or(Value::Null))
-                .trim_end()
-                .replace('\n', ", "),
-        ));
+    // The installed params print in the unit of the asset, as `params show` prints them.
+    // JSON keeps the typed values.
+    let installed = match verification
+        .comparisons
+        .iter()
+        .find(|comparison| comparison.field == "params" && !comparison.matches)
+    {
+        Some(differs) => with_installed_params(&document, &differs.expected, &differs.observed),
+        None => document.clone(),
+    };
+    match param_lines(network, &installed) {
+        Ok(lines) if lines.len() == verification.state.params.len() => {
+            rows.extend(
+                lines
+                    .into_iter()
+                    .map(|line| (format!("state.params.{}", line.key), line.value)),
+            );
+        }
+        _ => {
+            cx.out.warning(
+                "the installed params cannot be shown in asset units; --json prints their typed values",
+            );
+            term::flatten("state.params".into(), &value["state"]["params"], &mut rows);
+        }
     }
     cx.out.stdout.push_str(&term::render(&rows));
     Ok(code.code())
@@ -398,6 +470,34 @@ mod tests {
                 assert!(param_lines(network, &json!({})).is_err());
             },
         );
+    }
+
+    #[test]
+    fn a_draft_with_unresolved_input_exits_as_generation_does() {
+        let draft = |unresolved: Value| json!({"runtime": {"instanceBinding": {"portable": {"unresolved": unresolved}}}});
+        assert_eq!(draft_code(&draft(json!([]))), 0);
+        assert_eq!(draft_code(&draft(json!(["destinations"]))), 11);
+        assert_eq!(draft_code(&json!({})), 0);
+    }
+
+    #[test]
+    fn installed_params_replace_exactly_the_params_of_the_document() {
+        let expected = json!({"daily_spending_limit": {"Int": "50"}});
+        let observed = json!({"daily_spending_limit": {"Int": "20"}});
+        let document = json!({"selection": {"config": {"params": expected, "asset": "A"},
+            "policy": {"runtime": {"portable": {"params": expected}}, "other": {"Int": "50"}}}});
+        let installed = with_installed_params(&document, &expected, &observed);
+        assert_eq!(installed["selection"]["config"]["params"], observed);
+        assert_eq!(
+            installed["selection"]["policy"]["runtime"]["portable"]["params"],
+            observed
+        );
+        // Another value of the document stays, also when it equals one param's value.
+        assert_eq!(
+            installed["selection"]["policy"]["other"],
+            json!({"Int": "50"})
+        );
+        assert_eq!(installed["selection"]["config"]["asset"], "A");
     }
 
     #[test]
