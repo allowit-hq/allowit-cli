@@ -18,6 +18,12 @@ Commands:
   status      Read a request's state. The local journal supplies its rail and wallet; --rail and
               --wallet are the fallback
   history     List recent requests from the local journal
+  skills      Find paid services in the server's marketplace catalog
+  call        Call a paid service from the catalog or by URL: pay what the seller asks, within the
+              policy, and print the resource
+  curl        Request a URL; on HTTP 402 pay within the policy and request it once more with the
+              proof [alias: http]
+  mcp         Serve Allowit as Model Context Protocol tools on stdin and stdout
   completion  Print a shell completion script
   guide       Print the agent guide: the commands in the order an agent uses them
   version     Print the version and the git revision of the build
@@ -44,5 +50,6 @@ Exit codes:
   0 ok, 1 internal error, 2 usage error, 3 configuration or not supported on
   this rail, 4 rejected by the contract or refused by the server, 5 uncertain
   (retry with the same ID), 6 replayed, 7 network unavailable (retry with the
-  same ID), 10 owner signature needed, 11 waiting for owner input, 12 pending,
-  20 denied by the policy, 130 interrupted
+  same ID), 8 seller failed, 9 price above --max-price (nothing paid), 10 owner
+  signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
+  policy, 130 interrupted

@@ -1,0 +1,203 @@
+{
+  "tools": [
+    {
+      "description": "Search the marketplace catalog of the configured Allowit server for paid services. Free. Listed prices are indicative; the seller states the price when called.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "all_rails": {
+            "description": "Include entries of every rail, not only of the selected one",
+            "type": "boolean"
+          },
+          "cursor": {
+            "description": "nextCursor of the previous page",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "What the service should do. Empty lists the catalog.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "marketplace_search"
+    },
+    {
+      "description": "Read one marketplace catalog entry by its id: resource URL, methods and indicative terms. Free.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "marketplace_show"
+    },
+    {
+      "description": "Call a paid service by catalog entry id or URL. If the seller asks for payment, pay at most max_price within the wallet policy and return the resource. A policy denial is an error that names the rule.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "The request body",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Request headers by name",
+            "type": "object"
+          },
+          "max_price": {
+            "additionalProperties": false,
+            "description": "The most that this call may pay. A higher price is refused and nothing is paid.",
+            "properties": {
+              "amount": {
+                "description": "A decimal amount, such as 0.5",
+                "type": "string"
+              },
+              "unit": {
+                "description": "The asset code of the amount",
+                "type": "string"
+              }
+            },
+            "required": [
+              "amount",
+              "unit"
+            ],
+            "type": "object"
+          },
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
+            "type": "string"
+          },
+          "request_id": {
+            "description": "The request ID of the payment. Repeat it to retry: the same ID never pays twice.",
+            "type": "string"
+          },
+          "target": {
+            "description": "A catalog entry id or an http(s) URL",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "max_price"
+        ],
+        "type": "object"
+      },
+      "name": "call"
+    },
+    {
+      "description": "Request an http(s) URL. On HTTP 402, pay at most max_price within the wallet policy and request it once more with the proof of payment.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "The request body",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Request headers by name",
+            "type": "object"
+          },
+          "max_price": {
+            "additionalProperties": false,
+            "description": "The most that this call may pay. A higher price is refused and nothing is paid.",
+            "properties": {
+              "amount": {
+                "description": "A decimal amount, such as 0.5",
+                "type": "string"
+              },
+              "unit": {
+                "description": "The asset code of the amount",
+                "type": "string"
+              }
+            },
+            "required": [
+              "amount",
+              "unit"
+            ],
+            "type": "object"
+          },
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
+            "type": "string"
+          },
+          "request_id": {
+            "description": "The request ID of the payment. Repeat it to retry: the same ID never pays twice.",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "max_price"
+        ],
+        "type": "object"
+      },
+      "name": "http"
+    },
+    {
+      "description": "Read the receipt of one request by its ID: transaction, ledger, fee, counted fee and limits. Pays nothing.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "wait_seconds": {
+            "maximum": 600,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "name": "status"
+    },
+    {
+      "description": "Show the selected wallet: its kind, policy params and spending limits. Changes nothing.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "wallet_show"
+    }
+  ]
+}

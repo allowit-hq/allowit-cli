@@ -28,6 +28,11 @@ pub(crate) enum Command {
     Use(r#use::Args),
 }
 
+/// `wallet show` for a caller inside the process, such as the `mcp` tools.
+pub(crate) fn show(cx: &mut Ctx) -> Result<i32> {
+    show::run(show::Args {}, cx)
+}
+
 pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
     match command {
         Command::Import(a) => import::run(a, cx),

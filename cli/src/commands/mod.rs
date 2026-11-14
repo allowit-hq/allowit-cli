@@ -1,5 +1,6 @@
 //! The command tree. Each verb owns its arguments and terminal interaction.
 //! SDK engine supplies shared execution and recovery workflows.
+mod call;
 mod completion;
 mod config;
 mod examples;
@@ -7,8 +8,10 @@ pub(crate) mod exec;
 mod guide;
 mod history;
 mod keys;
+mod mcp;
 mod policy;
 mod rail;
+mod skills;
 mod status;
 mod version;
 mod wallet;
@@ -42,8 +45,9 @@ Exit codes:
   0 ok, 1 internal error, 2 usage error, 3 configuration or not supported on
   this rail, 4 rejected by the contract or refused by the server, 5 uncertain
   (retry with the same ID), 6 replayed, 7 network unavailable (retry with the
-  same ID), 10 owner signature needed, 11 waiting for owner input, 12 pending,
-  20 denied by the policy, 130 interrupted";
+  same ID), 8 seller failed, 9 price above --max-price (nothing paid), 10 owner
+  signature needed, 11 waiting for owner input, 12 pending, 20 denied by the
+  policy, 130 interrupted";
 
 /// Flags that every command accepts.
 #[derive(Args, Clone, Debug, Default)]
@@ -138,6 +142,14 @@ pub(crate) enum Command {
     Status(status::Args),
     #[command(before_help = history::EXAMPLES)]
     History(history::Args),
+    #[command(subcommand, before_help = skills::EXAMPLES)]
+    Skills(skills::Command),
+    #[command(before_help = call::CALL_EXAMPLES)]
+    Call(call::CallArgs),
+    #[command(visible_alias = "http", before_help = call::CURL_EXAMPLES)]
+    Curl(call::CurlArgs),
+    #[command(before_help = mcp::EXAMPLES)]
+    Mcp(mcp::Args),
     #[command(before_help = completion::EXAMPLES)]
     Completion(completion::Args),
     #[command(before_help = guide::EXAMPLES)]
@@ -364,6 +376,10 @@ pub(crate) fn dispatch(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Exec(a) => exec::run(a, cx),
         Command::Status(a) => status::run(a, cx),
         Command::History(a) => history::run(a, cx),
+        Command::Skills(c) => skills::run(c, cx),
+        Command::Call(a) => call::run_call(a, cx),
+        Command::Curl(a) => call::run_curl(a, cx),
+        Command::Mcp(a) => mcp::run(a, cx),
         Command::Completion(a) => completion::run(a, cx),
         Command::Guide(a) => guide::run(a, cx),
         Command::Version(a) => version::run(a, cx),
