@@ -42,7 +42,11 @@ target() {
     *) return 0 ;;
   esac
   case $os in
-    Linux) echo "$arch-unknown-linux-gnu" ;;
+    Linux)
+      # A release binary is linked against glibc. A system with another libc, such as musl,
+      # builds from source.
+      if (ldd --version 2>&1 || true) | grep -qi musl || ls /lib/ld-musl-* >/dev/null 2>&1; then return 0; fi
+      echo "$arch-unknown-linux-gnu" ;;
     Darwin) echo "$arch-apple-darwin" ;;
   esac
 }
