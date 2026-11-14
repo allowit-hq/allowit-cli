@@ -129,6 +129,50 @@ fn request_digest(request: &SellerRequest) -> String {
     allowit_sdk::digest(&bytes)
 }
 
+/// The server's code for a challenge that another request of the policy
+/// already pays.
+const CHALLENGE_PAID: &str = "challenge_already_paid";
+
+/// The request ID that already pays `challenge`, after the server refused
+/// `refused_id` for it: the ID in the refusal's details when the rail passes
+/// them on, else the request of this journal that names the same challenge
+/// and the same seller request. A payment made from another journal, or for
+/// another seller request, is not presented here.
+fn original_request(
+    cx: &mut Ctx,
+    error: &Error,
+    challenge: &Challenge,
+    request: &str,
+    refused_id: &str,
+) -> Result<String> {
+    if let Some(id) = error.detail("requestId").filter(|id| request_id_valid(id)) {
+        return Ok(id.to_owned());
+    }
+    let dir = cx.dir()?;
+    journal::entries(&dir)?
+        .into_iter()
+        .find(|entry| {
+            entry.request_id != refused_id
+                && entry.paid_request.as_deref() == Some(request)
+                && entry.challenge.as_ref().is_some_and(|paid| {
+                    paid.id.is_some()
+                        && paid.id == challenge.id
+                        && paid.pay_to == challenge.pay_to
+                        && paid.network == challenge.network
+                })
+        })
+        .map(|entry| entry.request_id)
+        .ok_or_else(|| {
+            let mut refused = Error::refused(
+                409,
+                CHALLENGE_PAID,
+                "another request of this policy already pays this challenge, and this journal does not hold it; run the command again with the --request-id of that request",
+            );
+            refused.code = error.code;
+            refused
+        })
+}
+
 /// Pay `challenge` through `exec` under the policy, or resume its payment,
 /// and return the confirmed outcome.
 fn pay(
@@ -164,11 +208,8 @@ fn pay(
         Ok((outcome, payment)) => (outcome, payment, request_id),
         // The server already holds a request of this policy for this challenge.
         // Its original request ID pays it: read that one, and pay nothing.
-        Err(error)
-            if error.api_code.as_deref() == Some("challenge_already_paid")
-                && error.detail("requestId").is_some_and(request_id_valid) =>
-        {
-            let original = error.detail("requestId").unwrap_or_default().to_owned();
+        Err(error) if error.api_code.as_deref() == Some(CHALLENGE_PAID) => {
+            let original = original_request(cx, &error, challenge, request, &request_id)?;
             cx.out.progress(format!(
                 "Request {original} already pays this challenge; reading it"
             ));
@@ -492,6 +533,84 @@ mod tests {
             let error = within_bound(&mut cx, &unknown, Some(&bound("1"))).unwrap_err();
             assert_eq!(error.code, 8, "{}", rail.id());
         });
+    }
+
+    #[test]
+    fn the_original_request_of_a_paid_challenge_comes_from_the_refusal_or_the_journal() {
+        let dir = crate::settings::temp_dir("paid-original");
+        let mut cx = Ctx::new(
+            crate::commands::Global {
+                config_dir: Some(dir),
+                ..Default::default()
+            },
+            crate::term::Out::new(false, true, false, true),
+        );
+        let dir = cx.dir().unwrap();
+        let entry =
+            |id: &str, challenge: Option<Challenge>, request: Option<&str>| journal::Entry {
+                request_id: id.into(),
+                command: "call".into(),
+                rail: "example:testnet".into(),
+                wallet: None,
+                policy: None,
+                op: "transfer".into(),
+                to: "RECIPIENT".into(),
+                amount: "XYZ:0.25".into(),
+                profile_version: None,
+                server_origin: None,
+                created_at: 1,
+                exit: Some(0),
+                challenge,
+                paid_request: request.map(str::to_owned),
+            };
+        let paid = challenge(Some("c-0001"));
+        for record in [
+            entry("pay-original-1", Some(paid.clone()), Some("digest-a")),
+            entry(
+                "pay-other-0001",
+                Some(challenge(Some("c-0002"))),
+                Some("digest-a"),
+            ),
+            entry("pay-plain-0001", None, None),
+        ] {
+            journal::record(&dir, &record).unwrap();
+        }
+        let refused = Error::refused(409, CHALLENGE_PAID, "already paid");
+        let mut find = |error: &Error, challenge: &Challenge, request: &str, refused_id: &str| {
+            original_request(&mut cx, error, challenge, request, refused_id)
+        };
+        // The journal names the request that holds the same challenge and seller request.
+        assert_eq!(
+            find(&refused, &paid, "digest-a", "pay-second-01").unwrap(),
+            "pay-original-1"
+        );
+        // A rail that passes the server's details on names the request directly.
+        let named = refused
+            .clone()
+            .with_details(json!({"requestId": "pay-named-0001"}));
+        assert_eq!(
+            find(&named, &paid, "digest-a", "pay-second-01").unwrap(),
+            "pay-named-0001"
+        );
+        // Another seller request, another challenge, another recipient or network, the
+        // refused request itself and a challenge without an ID name no request: the
+        // refusal stays an error with the server's code, and nothing is presented.
+        let mut recipient = paid.clone();
+        recipient.pay_to = "OTHER".into();
+        let mut network = paid.clone();
+        network.network = "example:mainnet".into();
+        for (challenge, request, refused_id) in [
+            (&paid, "digest-b", "pay-second-01"),
+            (&challenge(Some("c-0009")), "digest-a", "pay-second-01"),
+            (&recipient, "digest-a", "pay-second-01"),
+            (&network, "digest-a", "pay-second-01"),
+            (&paid, "digest-a", "pay-original-1"),
+            (&challenge(None), "digest-a", "pay-second-01"),
+        ] {
+            let error = find(&refused, challenge, request, refused_id).unwrap_err();
+            assert_eq!(error.api_code.as_deref(), Some(CHALLENGE_PAID));
+            assert_eq!(error.code, refused.code);
+        }
     }
 
     #[test]
