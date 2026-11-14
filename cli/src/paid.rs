@@ -105,14 +105,17 @@ fn within_bound(cx: &mut Ctx, challenge: &Challenge, max_price: Option<&str>) ->
 }
 
 /// The digest of the whole seller request: the method, the URL, the headers in
-/// name order and the body. The payment of a request ID buys this request.
+/// name order with the values of a repeated header in their order, and the
+/// body. The payment of a request ID buys this request.
 fn request_digest(request: &SellerRequest) -> String {
     let mut headers: Vec<(String, &str)> = request
         .headers
         .iter()
         .map(|(name, value)| (name.to_ascii_lowercase(), value.as_str()))
         .collect();
-    headers.sort();
+    // A stable sort by name: the values of one repeated header keep their order,
+    // which can carry meaning.
+    headers.sort_by(|a, b| a.0.cmp(&b.0));
     let mut bytes = Vec::new();
     let mut field = |part: &[u8]| {
         bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
@@ -136,32 +139,38 @@ const CHALLENGE_PAID: &str = "challenge_already_paid";
 /// The request ID that already pays `challenge`, after the server refused
 /// `refused_id` for it: the ID in the refusal's details when the rail passes
 /// them on, else the request of this journal that names the same challenge
-/// and the same seller request. A payment made from another journal, or for
-/// another seller request, is not presented here.
+/// and the same seller request and whose payment was `submitted`. A request
+/// that the server refused or the policy denied is in the journal too, and it
+/// paid nothing: only a submitted one is read. A payment made from another
+/// journal, or for another seller request, is not presented here.
 fn original_request(
     cx: &mut Ctx,
     error: &Error,
     challenge: &Challenge,
     request: &str,
     refused_id: &str,
+    submitted: &mut dyn FnMut(&mut Ctx, &str) -> Result<bool>,
 ) -> Result<String> {
     if let Some(id) = error.detail("requestId").filter(|id| request_id_valid(id)) {
         return Ok(id.to_owned());
     }
     let dir = cx.dir()?;
-    journal::entries(&dir)?
-        .into_iter()
-        .find(|entry| {
-            entry.request_id != refused_id
-                && entry.paid_request.as_deref() == Some(request)
-                && entry.challenge.as_ref().is_some_and(|paid| {
-                    paid.id.is_some()
-                        && paid.id == challenge.id
-                        && paid.pay_to == challenge.pay_to
-                        && paid.network == challenge.network
-                })
-        })
-        .map(|entry| entry.request_id)
+    let mut original = None;
+    for entry in journal::entries(&dir)? {
+        let same = entry.request_id != refused_id
+            && entry.paid_request.as_deref() == Some(request)
+            && entry.challenge.as_ref().is_some_and(|paid| {
+                paid.id.is_some()
+                    && paid.id == challenge.id
+                    && paid.pay_to == challenge.pay_to
+                    && paid.network == challenge.network
+            });
+        if same && submitted(cx, &entry.request_id)? {
+            original = Some(entry.request_id);
+            break;
+        }
+    }
+    original
         .ok_or_else(|| {
             let mut refused = Error::refused(
                 409,
@@ -209,7 +218,8 @@ fn pay(
         // The server already holds a request of this policy for this challenge.
         // Its original request ID pays it: read that one, and pay nothing.
         Err(error) if error.api_code.as_deref() == Some(CHALLENGE_PAID) => {
-            let original = original_request(cx, &error, challenge, request, &request_id)?;
+            let original =
+                original_request(cx, &error, challenge, request, &request_id, &mut submitted)?;
             cx.out.progress(format!(
                 "Request {original} already pays this challenge; reading it"
             ));
@@ -575,9 +585,26 @@ mod tests {
         ] {
             journal::record(&dir, &record).unwrap();
         }
+        // Later requests for the same challenge that the server refused: they are in the
+        // journal, they paid nothing and they are newer than the request that settled.
+        for (id, created_at) in [("pay-refused-01", 9), ("pay-refused-02", 8)] {
+            let mut later = entry(id, Some(paid.clone()), Some("digest-a"));
+            later.created_at = created_at;
+            later.exit = Some(4);
+            journal::record(&dir, &later).unwrap();
+        }
         let refused = Error::refused(409, CHALLENGE_PAID, "already paid");
+        // Only the original request has a submitted payment.
+        let mut submitted = |_: &mut Ctx, id: &str| Ok(id == "pay-original-1");
         let mut find = |error: &Error, challenge: &Challenge, request: &str, refused_id: &str| {
-            original_request(&mut cx, error, challenge, request, refused_id)
+            original_request(
+                &mut cx,
+                error,
+                challenge,
+                request,
+                refused_id,
+                &mut submitted,
+            )
         };
         // The journal names the request that holds the same challenge and seller request.
         assert_eq!(
@@ -631,6 +658,15 @@ mod tests {
         reordered.headers.reverse();
         reordered.headers[0].0 = "ACCEPT".into();
         assert_eq!(request_digest(&reordered), digest);
+        // The values of one repeated header keep their order: another order is another
+        // request.
+        let mut repeated = base.clone();
+        repeated
+            .headers
+            .push(("Accept".into(), "application/json".into()));
+        let mut swapped = repeated.clone();
+        swapped.headers.swap(1, 2);
+        assert_ne!(request_digest(&repeated), request_digest(&swapped));
         // Every other difference is another request.
         let changed = |change: &dyn Fn(&mut SellerRequest)| {
             let mut request = base.clone();
