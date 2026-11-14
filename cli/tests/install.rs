@@ -49,12 +49,23 @@ fn release(root: &Path) -> std::path::PathBuf {
     release
 }
 
+fn path_with(dir: &Path) -> std::ffi::OsString {
+    let mut paths = vec![dir.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths).unwrap()
+}
+
 fn install(root: &Path, release: &Path, extra: &[(&str, &str)]) -> std::process::Output {
     let mut command = Command::new("sh");
     command
         .arg(script())
         .env("HOME", root)
         .env("ALLOWIT_INSTALL_DIR", root.join("bin"))
+        // The install directory is on PATH, so a root run of this test links nothing into
+        // /usr/local/bin.
+        .env("PATH", path_with(&root.join("bin")))
         .env(
             "ALLOWIT_RELEASE_URL",
             format!("file://{}", release.display()),
@@ -124,6 +135,7 @@ fn a_release_binary_is_installed_only_when_its_checksum_matches() {
         .arg(script())
         .env("HOME", &root)
         .env("ALLOWIT_INSTALL_DIR", root.join("bin"))
+        .env("PATH", path_with(&root.join("bin")))
         .env(
             "ALLOWIT_RELEASE_URL",
             format!("file://{}", release.display()),
