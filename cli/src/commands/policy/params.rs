@@ -243,8 +243,13 @@ pub(crate) fn update(a: Update, cx: &mut Ctx) -> Result<i32> {
     let network = cx.rail()?.id;
     let edits = pairs(&a.changes)?;
     let (bytes, document) = document(&a.policy_file)?;
-    // The values are parsed and checked before any key or network access.
-    let (typed, changes) = shared::typed_changes(network, &document, &edits, now()?)?;
+    // The values are parsed and checked before any key access. A new update refuses an expiry
+    // that has passed. A retained update under this request ID resumes with the values of its
+    // first run, also when an expiry among them has passed since: the journal binds the retry
+    // to the saved update, so the clock of the retry must not change the typed values.
+    let retained = owner::status(cx, &a.session.request_id).is_ok();
+    let at = if retained { 0 } else { now()? };
+    let (typed, changes) = shared::typed_changes(network, &document, &edits, at)?;
     let local = owner::load(cx, &a.session.owner_key)?;
     cx.confirm("Change these values of the installed wallet with the owner account")?;
     let out = shared::update_params(
