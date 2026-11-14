@@ -291,6 +291,19 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
         );
         let import = sandbox.run(&["wallet", "import", &format!("--policy={hyphen}")]);
         assert_ne!(code(&import), Some(2), "{}", stderr(&import));
+        // An IPv6 endpoint is one quoted shell word.
+        let mut v6 = body.clone();
+        v6["endpoint"] = json!("https://[2001:db8::1]:8443/rpc");
+        let (output, _) = served(&mut sandbox, &["--json", ID, "help"], vec![(200, v6)]);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            value["steps"][0]["commands"][0]
+                .as_str()
+                .unwrap()
+                .ends_with("--rpc-url 'https://[2001:db8::1]:8443/rpc'"),
+            "{value}"
+        );
         // A wallet named for this call that is not the policy wallet: the payment names the
         // policy wallet, which outranks the environment.
         sandbox.set("ALLOWIT_WALLET", &rail.fixtures.account);

@@ -94,6 +94,7 @@ fn shell_quote(text: &str) -> String {
     if !text.is_empty() && text.bytes().all(plain) {
         text.to_owned()
     } else {
+        // Inside single quotes a shell reads every character as itself.
         format!("'{}'", text.replace('\'', "'\\''"))
     }
 }
@@ -207,7 +208,14 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             if !(endpoint.starts_with("https://") || endpoint.starts_with("http://")) {
                 return Err(invalid());
             }
-            shell_safe(endpoint, 512)
+            // An IPv6 host has brackets, which a shell reads as a pattern: the URL without
+            // them is plain, and the printed command quotes the whole URL.
+            let plain: String = endpoint
+                .chars()
+                .filter(|c| !matches!(c, '[' | ']'))
+                .collect();
+            shell_safe(&plain, 512)?;
+            Ok(endpoint.clone())
         })
         .transpose()?;
     let wallet = facts
@@ -282,7 +290,11 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     };
     let again = with_url(&format!("{cli} {} help", args.id));
     let select = match &endpoint {
-        Some(endpoint) => format!("{cli} rail use {} --rpc-url {endpoint}", rail.id),
+        Some(endpoint) => format!(
+            "{cli} rail use {} --rpc-url {}",
+            rail.id,
+            shell_quote(endpoint)
+        ),
         None => format!("{cli} rail use {}", rail.id),
     };
     let endpoint_note = endpoint.is_none().then(|| {
