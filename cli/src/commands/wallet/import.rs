@@ -16,7 +16,7 @@ pub(crate) struct Args {
     #[arg(required_unless_present = "policy", conflicts_with = "policy")]
     pub profile_file: Option<PathBuf>,
     /// Read the public profile of this policy id from the ALLOWIT_URL server
-    #[arg(long, value_name = "POLICY_ID")]
+    #[arg(long, value_name = "POLICY_ID", allow_hyphen_values = true)]
     pub policy: Option<String>,
 }
 pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {

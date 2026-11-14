@@ -149,7 +149,7 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
             format!("  allowit rail trust {origin} {server_key}"),
             // The local key that holds the agent public key, by its own name.
             "  allowit keys use payer".into(),
-            format!("  ALLOWIT_URL={origin} allowit wallet import --policy {ID}"),
+            format!("  ALLOWIT_URL={origin} allowit wallet import --policy={ID}"),
             format!("  allowit wallet use {wallet}"),
             format!(
                 "  ALLOWIT_URL={origin} allowit exec --op transfer --to {destination} --amount UNIT:AMOUNT --request-id pay-0001"
@@ -196,6 +196,73 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
         let config = std::fs::read_to_string(sandbox.config().join("config.toml")).unwrap();
         assert!(!config.contains(&server_key), "{config}");
         assert!(!sandbox.config().join("public-profiles").exists());
+        // An issued asset names its issuer in the payment example.
+        let mut issued = body.clone();
+        issued["profile"]["config"] = json!({"assetIssuer": server_key});
+        let (output, _) = served(&mut sandbox, &["--json", ID, "help"], vec![(200, issued)]);
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            value["examples"]["pay"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("--amount UNIT:{server_key}:AMOUNT ")),
+            "{value}"
+        );
+        // A rail named for this call that is not the policy's rail: every printed command
+        // names the policy's rail, which outranks the environment.
+        if let Some(other) = rail.other {
+            sandbox.set("ALLOWIT_RAIL", other);
+            let (output, _) = served(
+                &mut sandbox,
+                &["--json", ID, "help"],
+                vec![(200, body.clone())],
+            );
+            assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            for command in value["steps"][0]["commands"].as_array().unwrap() {
+                assert!(
+                    command
+                        .as_str()
+                        .unwrap()
+                        .contains(&format!("allowit --rail {net} ")),
+                    "{command}"
+                );
+            }
+            sandbox.set("ALLOWIT_RAIL", net);
+            let (output, _) = served(
+                &mut sandbox,
+                &["--json", ID, "help"],
+                vec![(200, body.clone())],
+            );
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(
+                !value["steps"][0]["commands"][1]
+                    .as_str()
+                    .unwrap()
+                    .contains("--rail")
+            );
+        }
+        // A policy id that starts with a hyphen keeps its attached form on the import.
+        let hyphen = "-1WagPbql_eK8CwzC4dxHJDMtC5wilVg";
+        let (output, requests) = served(
+            &mut sandbox,
+            &["--json", hyphen, "help"],
+            vec![(200, body.clone())],
+        );
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        assert_eq!(
+            requests,
+            [format!("GET /api/agent/policy?id={hyphen} HTTP/1.1")]
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            value["steps"][0]["commands"][3]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("wallet import --policy={hyphen}"))
+        );
+        let import = sandbox.run(&["wallet", "import", &format!("--policy={hyphen}")]);
+        assert_ne!(code(&import), Some(2), "{}", stderr(&import));
         // A device without the agent's key gets no setup and no payment command.
         let mut other = Sandbox::new("policy-help-other-device");
         let (output, _) = served(

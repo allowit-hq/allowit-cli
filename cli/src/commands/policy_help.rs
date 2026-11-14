@@ -259,13 +259,20 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     // A `--config-dir` flag of this call stays on every printed command: the commands then
     // read and write the directory that holds the key found above. A directory from
     // `ALLOWIT_CONFIG_DIR` stays in the caller's environment.
-    let cli = match &cx.global.config_dir {
+    let mut cli = match &cx.global.config_dir {
         Some(dir) if cx.global.config_dir_flag => format!(
             "allowit --config-dir {}",
             shell_quote(&dir.to_string_lossy())
         ),
         _ => "allowit".to_owned(),
     };
+    // `--rail` or `ALLOWIT_RAIL` of this call outranks the rail that `rail use` saves. When it
+    // names another rail than the policy's, every printed command names the policy's rail.
+    if let Some(named) = &cx.global.rail
+        && routing::info(named).map(|named| named.id).ok() != Some(rail.id)
+    {
+        cli = format!("{cli} --rail {}", rail.id);
+    }
     let with_url = |command: &str| {
         if implicit {
             command.to_owned()
@@ -343,11 +350,24 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                             select,
                             format!("{cli} rail trust {origin} {server_key}"),
                             format!("{cli} keys use {name}"),
-                            with_url(&format!("{cli} wallet import --policy {}", args.id)),
+                            // The attached form: an id can start with a hyphen.
+                            with_url(&format!("{cli} wallet import --policy={}", args.id)),
                             format!("{cli} wallet use {wallet}"),
                         ],
                     });
-                    let symbol = symbol.as_deref().unwrap_or("ASSET");
+                    // The amount syntax of the installed asset: an issued asset names its
+                    // issuer, so the example pays the policy's own asset.
+                    let issuer = facts
+                        .profile
+                        .as_ref()
+                        .and_then(|profile| profile["config"]["assetIssuer"].as_str())
+                        .filter(|issuer| address::check_account(rail.family, issuer).is_ok())
+                        .and_then(|issuer| shell_safe(issuer, 128).ok());
+                    let symbol = match (symbol.as_deref(), issuer) {
+                        (Some(symbol), Some(issuer)) => format!("{symbol}:{issuer}"),
+                        (Some(symbol), None) => symbol.to_owned(),
+                        (None, _) => "ASSET".to_owned(),
+                    };
                     // The first allowed destination of the policy, when it lists them.
                     let destination = facts
                         .profile

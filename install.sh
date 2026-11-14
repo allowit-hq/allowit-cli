@@ -19,6 +19,7 @@
 #   ALLOWIT_FROM_SOURCE  1 builds from source even when a release binary exists
 #   ALLOWIT_NO_DEPS      1 installs no build tool and no Rust; the script names what is missing
 #   ALLOWIT_DRY_RUN      1 prints the plan and changes nothing
+#   ALLOWIT_VERBOSE      1 prints the output of apt-get, rustup and cargo as they run
 set -eu
 
 REPO=allowit-hq/allowit-cli
@@ -71,6 +72,15 @@ commit_of() {
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t allowit-install)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
+# Runs a long tool quietly: its output goes to a log, and the end of the log is printed only
+# when the tool fails. A reader, human or agent, sees one line per step.
+quiet() {
+  if [ "${ALLOWIT_VERBOSE:-0}" = 1 ]; then "$@" >&2 </dev/null; return; fi
+  if "$@" >"$TMP/step.log" 2>&1 </dev/null; then return 0; fi
+  tail -n 30 "$TMP/step.log" >&2
+  return 1
+}
+
 install_binary() { # install_binary FILE
   [ "$DRY" = 1 ] && return 0
   mkdir -p "$DIR"
@@ -112,7 +122,8 @@ build_tools() {
     if [ "$DRY" = 1 ]; then say "would install with apt-get:$missing"; return 0; fi
     say "installing build tools with apt-get:$missing"
     # shellcheck disable=SC2086 # the list is split into package names on purpose
-    apt-get update -qq >&2 </dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $missing >&2 </dev/null ||
+    DEBIAN_FRONTEND=noninteractive; export DEBIAN_FRONTEND
+    quiet apt-get update -qq && quiet apt-get install -y -qq --no-install-recommends $missing ||
       die "apt-get could not install:$missing"
   else
     die "a source build needs:$missing. Install them, then run this script again."
@@ -130,7 +141,7 @@ from_source() {
     else
       say "installing Rust with rustup (minimal profile) from https://sh.rustup.rs"
       fetch https://sh.rustup.rs "$TMP/rustup.sh" || die "the download of rustup failed"
-      sh "$TMP/rustup.sh" -y --profile minimal --default-toolchain stable >&2 </dev/null || die "rustup failed"
+      quiet sh "$TMP/rustup.sh" -y --profile minimal --default-toolchain stable || die "rustup failed"
       PATH=$HOME/.cargo/bin:$PATH
     fi
   fi
@@ -139,8 +150,9 @@ from_source() {
   [ -n "$commit" ] || die "$SOURCE has no branch, tag or commit $REF"
   say "building commit $commit with $(cargo --version)"
   # The build script records this revision in `allowit --version`.
-  ALLOWIT_BUILD_REVISION=$(printf %.12s "$commit") cargo install --locked --git "$SOURCE.git" --rev "$commit" \
-    --bin allowit --root "$TMP/root" allowit-cli >&2 </dev/null || die "the build failed"
+  ALLOWIT_BUILD_REVISION=$(printf %.12s "$commit"); export ALLOWIT_BUILD_REVISION
+  quiet cargo install --locked --git "$SOURCE.git" --rev "$commit" --bin allowit --root "$TMP/root" allowit-cli ||
+    die "the build failed"
   install_binary "$TMP/root/bin/allowit"
 }
 
