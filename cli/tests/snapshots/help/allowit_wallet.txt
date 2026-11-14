@@ -8,7 +8,8 @@ Examples:
 
 Commands:
   import  Verify and cache a public profile without changing the selected agent key
-  setup   Configure a fresh funded account with distinct owner, agent and server roles
+  setup   Create the agent's own wallet account with one owner-signed transaction and register it
+          with the server
   ls      List the wallets this device knows on the current rail [alias: list]
   show    Show the wallet: its roles, asset and state
   use     Make an address the current rail's default wallet

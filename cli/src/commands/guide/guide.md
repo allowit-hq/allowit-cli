@@ -106,6 +106,26 @@ The sign-in Origin must be allowed by that backend.
 The owner key does not replace the selected agent key. `--new-wallet` requires an advertised template;
 `--installation ID` explicitly selects an existing owner installation instead.
 Generation returns a draft. It does not deploy, fund or activate a wallet.
+
+A `native` wallet is the agent's own account. Each agent gets one, and the owner's account is never the wallet:
+
+```sh
+allowit --json wallet setup --owner-key owner --origin http://localhost:5173 \
+  --agent-key agent --server ADDRESS --request-id setup-0001 --yes
+allowit --json policy generate --owner-key owner --origin http://localhost:5173 \
+  --kind native --installation INSTALLATION 'Pay only my approved recipient'
+allowit --json policy activate draft.json --owner-key owner --origin http://localhost:5173 \
+  --agent-key agent --server ADDRESS --request-id activate-0001 --yes
+allowit --json policy fund selection.json --owner-key owner --origin http://localhost:5173 \
+  --request-id fund-0001 --amount 20 --fee-limit 100000 --yes
+```
+
+`wallet setup` signs one transaction with the owner key. It creates the account, makes the owner able to do
+everything alone, and lets the agent and the server pay only together. The server registers the wallet from the
+ledger: no server configuration names it. The reply holds the `wallet`, its signers and thresholds, the reserve
+that stays locked in the account, and the `installation` ID for `policy generate`. A second agent gets a second
+wallet with its own setup. `policy update` changes a value of an active native policy with one owner signature
+and no transaction; `policy export` with the update's request ID then gives the agent the updated profile.
 Exit 11 means that owner input remains unresolved.
 After uncertain generation, inspect the owner workspace before creating another draft.
 
