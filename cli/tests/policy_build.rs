@@ -66,7 +66,16 @@ fn served(
     args: &[&str],
     replies: Vec<(u16, Value)>,
 ) -> (std::process::Output, Vec<String>) {
-    let mock = Mock::new();
+    served_by(Mock::new(), sandbox, args, replies)
+}
+
+/// The same, on a server that the test created before, so that a setting can name its origin.
+fn served_by(
+    mock: Mock,
+    sandbox: &mut Sandbox,
+    args: &[&str],
+    replies: Vec<(u16, Value)>,
+) -> (std::process::Output, Vec<String>) {
     sandbox.set("ALLOWIT_URL", &mock.url);
     let url = mock.url.clone();
     let listener = mock.listener;
@@ -121,8 +130,20 @@ fn a_presignature_of_an_untrusted_server_key_stops_the_build_before_it_compiles(
         // The server signs with another key than the one of the owner's build command.
         let (output, requests) = served(
             &mut sandbox,
-            &["--json", "policy", "build", ID, "--ticket", TICKET, "--server-key", trusted.address()],
-            vec![(200, admission(rail, &untrusted, &source, &source)), (200, json!({}))],
+            &[
+                "--json",
+                "policy",
+                "build",
+                ID,
+                "--ticket",
+                TICKET,
+                "--server-key",
+                trusted.address(),
+            ],
+            vec![
+                (200, admission(rail, &untrusted, &source, &source)),
+                (200, json!({})),
+            ],
         );
         assert_eq!(code(&output), Some(2), "{}", stderr(&output));
         assert_eq!(
@@ -132,7 +153,9 @@ fn a_presignature_of_an_untrusted_server_key_stops_the_build_before_it_compiles(
         // Only the read arrived: no code was built or handed over.
         assert_eq!(
             requests,
-            [format!("GET /api/custom/build?id={ID}&ticket={TICKET} HTTP/1.1")]
+            [format!(
+                "GET /api/custom/build?id={ID}&ticket={TICKET} HTTP/1.1"
+            )]
         );
         assert!(!sandbox.config().join("custom-build").exists());
     });
@@ -147,8 +170,20 @@ fn source_that_the_server_did_not_presign_stops_the_build_before_it_compiles() {
         let mut sandbox = Sandbox::new("build-altered");
         let (output, requests) = served(
             &mut sandbox,
-            &["--json", "policy", "build", ID, "--ticket", TICKET, "--server-key", server.address()],
-            vec![(200, admission(rail, &server, &source, &altered)), (200, json!({}))],
+            &[
+                "--json",
+                "policy",
+                "build",
+                ID,
+                "--ticket",
+                TICKET,
+                "--server-key",
+                server.address(),
+            ],
+            vec![
+                (200, admission(rail, &server, &source, &altered)),
+                (200, json!({})),
+            ],
         );
         assert_eq!(code(&output), Some(2), "{}", stderr(&output));
         assert_eq!(
@@ -168,16 +203,35 @@ fn the_server_key_of_the_command_must_equal_the_pinned_key() {
         let mut sandbox = Sandbox::new("build-pinned");
         let mock = Mock::new();
         sandbox.set("ALLOWIT_URL", &mock.url);
-        sandbox.ok(&["--rail", rail.network, "rail", "trust", &mock.url, pinned.address()]);
-        drop(mock);
+        sandbox.ok(&[
+            "--rail",
+            rail.network,
+            "rail",
+            "trust",
+            &mock.url,
+            pinned.address(),
+        ]);
         // The command names another key than the one that `rail trust` pinned for this server.
-        let (output, _) = served(
+        let (output, _) = served_by(
+            mock,
             &mut sandbox,
-            &["policy", "build", ID, "--ticket", TICKET, "--server-key", other.address()],
+            &[
+                "policy",
+                "build",
+                ID,
+                "--ticket",
+                TICKET,
+                "--server-key",
+                other.address(),
+            ],
             vec![(200, admission(rail, &other, &source, &source))],
         );
         assert_eq!(code(&output), Some(3), "{}", stderr(&output));
-        assert!(stderr(&output).contains("--server-key differs"), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("--server-key differs"),
+            "{}",
+            stderr(&output)
+        );
         assert!(!sandbox.config().join("custom-build").exists());
     });
 }
@@ -194,8 +248,20 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
         sandbox.set("PATH", &empty);
         let (output, requests) = served(
             &mut sandbox,
-            &["--json", "policy", "build", ID, "--ticket", TICKET, "--server-key", server.address()],
-            vec![(200, admission(rail, &server, &source, &source)), (200, json!({}))],
+            &[
+                "--json",
+                "policy",
+                "build",
+                ID,
+                "--ticket",
+                TICKET,
+                "--server-key",
+                server.address(),
+            ],
+            vec![
+                (200, admission(rail, &server, &source, &source)),
+                (200, json!({})),
+            ],
         );
         assert_eq!(code(&output), Some(2), "{}", stderr(&output));
         let error = error(&output);
@@ -205,7 +271,10 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
             "{error}"
         );
         assert!(
-            error["error"]["message"].as_str().unwrap().contains("Install"),
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Install"),
             "{error}"
         );
         // The source was read; no code was handed over.

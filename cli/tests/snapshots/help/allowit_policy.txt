@@ -19,6 +19,8 @@ Commands:
   update        Change values of an active wallet with one owner signature; usage and nonce stay
   verify        Compare a wallet document with the ledger and read the wallet state back
   export-pair   Print what the server evaluates and what the wallet enforces for a policy
+  build         Build the wallet code of a Custom policy from its admitted source and attest the
+                build
   kinds         List the wallet kinds of the selected rail: what enforces the policy and what holds
                 the funds
   generate      Generate a portable draft through the owner-authenticated server; does not deploy or

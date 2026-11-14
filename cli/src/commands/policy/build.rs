@@ -95,13 +95,16 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let server = cx.server_url()?;
     // A local owner key signs in for the ticket and signs the attestation.
     let local = match (&a.owner_key, &a.origin) {
-        (Some(name), Some(origin)) => Some((owner::signer(cx, name)?, name.clone(), origin.clone())),
+        (Some(name), Some(origin)) => {
+            Some((owner::signer(cx, name)?, name.clone(), origin.clone()))
+        }
         _ => None,
     };
     let ticket = match (&a.ticket, &local) {
         (Some(ticket), _) => ticket.clone(),
         (None, Some((_, name, origin))) => {
-            cx.out.progress("Reading the build ticket with the owner session");
+            cx.out
+                .progress("Reading the build ticket with the owner session");
             let session = owner::load_for_server(cx, name)?;
             custom_build::owner_view(&session.context(origin), &a.policy_id)?.ticket
         }
@@ -173,14 +176,20 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let mut rows = vec![
         ("policy".to_owned(), admission.policy_id.clone()),
         ("network".into(), rail.id.into()),
-        ("source hash".into(), admission.presignature.source_hash.clone()),
+        (
+            "source hash".into(),
+            admission.presignature.source_hash.clone(),
+        ),
         ("code hash".into(), code_hash),
         ("toolchain".into(), built.toolchain.clone()),
     ];
     if let Some(out) = &a.out {
         rows.push(("wallet code".into(), out.display().to_string()));
     }
-    rows.push(("attested".into(), if attested { "yes" } else { "no" }.into()));
+    rows.push((
+        "attested".into(),
+        if attested { "yes" } else { "no" }.into(),
+    ));
     rows.push(("next".into(), next.into()));
     let width = rows.iter().map(|(key, _)| key.len()).max().unwrap_or(0);
     let padded: Vec<_> = rows
