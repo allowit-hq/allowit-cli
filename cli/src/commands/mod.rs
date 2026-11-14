@@ -10,6 +10,7 @@ mod history;
 mod keys;
 mod mcp;
 mod policy;
+pub(crate) mod policy_help;
 mod rail;
 mod skills;
 mod status;
@@ -35,6 +36,7 @@ fn examples_template(examples: &str) -> String {
 
 const ROOT_EXAMPLES: &str = "\
 Examples:
+  allowit POLICY_ID help
   allowit rail use __ALLOWIT_EXAMPLE_RAIL__
   allowit keys generate agent
   allowit exec --op transfer --to DESTINATION --amount ASSET:5
@@ -106,6 +108,9 @@ pub(crate) struct Global {
     /// True when `--wallet` is on the command line, not from `ALLOWIT_WALLET`.
     #[arg(skip)]
     pub wallet_flag: bool,
+    /// True when `--config-dir` is on the command line, not from `ALLOWIT_CONFIG_DIR`.
+    #[arg(skip)]
+    pub config_dir_flag: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -156,6 +161,72 @@ pub(crate) enum Command {
     Guide(guide::Args),
     #[command(before_help = version::EXAMPLES)]
     Version(version::Args),
+    /// The command behind `allowit POLICY_ID help`
+    #[command(name = "policy-help", hide = true)]
+    PolicyHelp(policy_help::Args),
+}
+
+/// True for combined boolean short flags, such as `-qv`.
+fn short_cluster(token: &str) -> bool {
+    token.len() > 2
+        && token.len() <= 4
+        && token.starts_with('-')
+        && token[1..].chars().all(|c| matches!(c, 'y' | 'q' | 'v'))
+}
+
+/// Rewrites `allowit [FLAGS] POLICY_ID help` to the hidden `policy-help`
+/// command. The owner copies that line from the app, so the policy id is the
+/// first word. A word that is a command name is never an id, and an id can
+/// start with `-`, so the id travels as `--id=POLICY_ID`.
+pub(crate) fn policy_help_argv(argv: &[String]) -> Option<Vec<String>> {
+    const FLAGS: &[&str] = &[
+        "--json",
+        "-y",
+        "--yes",
+        "-q",
+        "--quiet",
+        "-v",
+        "--verbose",
+        "--no-color",
+    ];
+    let mut at = 1;
+    while at < argv.len() {
+        let token = argv[at].as_str();
+        if VALUE_FLAGS.contains(&token) {
+            at += 2;
+        } else if FLAGS.contains(&token)
+            || VALUE_FLAGS
+                .iter()
+                .any(|flag| token.starts_with(&format!("{flag}=")))
+        {
+            at += 1;
+        } else if short_cluster(token)
+            || (token.starts_with("-n")
+                && token.len() > 2
+                // An id can start with `-n` too: before `help` it is the id.
+                && !(policy_help::is_policy_id(token)
+                    && argv.get(at + 1).map(String::as_str) == Some("help")))
+        {
+            // `-qv`, or `-nRAIL` with its value attached.
+            at += 1;
+        } else {
+            break;
+        }
+    }
+    let id = argv.get(at)?;
+    if argv.get(at + 1).map(String::as_str) != Some("help")
+        || !policy_help::is_policy_id(id)
+        || command()
+            .get_subcommands()
+            .any(|c| c.get_name() == id || c.get_all_aliases().any(|alias| alias == id))
+    {
+        return None;
+    }
+    let mut out = argv[..at].to_vec();
+    out.push("policy-help".into());
+    out.push(format!("--id={id}"));
+    out.extend_from_slice(&argv[at + 2..]);
+    Some(out)
 }
 
 /// Parses `60s`, `5m`, `1h30m`, `500ms` or `0`, at most 10 minutes.
@@ -268,10 +339,12 @@ pub(crate) fn parse(argv: &[String], color: bool) -> Parsed {
             let from_flag =
                 |id: &str| matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
             let (rail_flag, wallet_flag) = (from_flag("rail"), from_flag("wallet"));
+            let config_dir_flag = from_flag("config_dir");
             match Cli::from_arg_matches_mut(&mut matches) {
                 Ok(mut cli) => {
                     cli.global.rail_flag = rail_flag;
                     cli.global.wallet_flag = wallet_flag;
+                    cli.global.config_dir_flag = config_dir_flag;
                     match cli.command {
                         None => Parsed::Print(examples::help(cmd.render_help().to_string(), argv)),
                         Some(_) => Parsed::Run(Box::new(cli)),
@@ -383,6 +456,7 @@ pub(crate) fn dispatch(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Completion(a) => completion::run(a, cx),
         Command::Guide(a) => guide::run(a, cx),
         Command::Version(a) => version::run(a, cx),
+        Command::PolicyHelp(a) => policy_help::run(a, cx),
     }
 }
 
@@ -521,6 +595,71 @@ mod tests {
             })
             .collect();
         assert!(missing.is_empty(), "cli/README.md omits {missing:?}");
+    }
+    #[test]
+    fn a_policy_id_before_help_selects_the_policy_help_command() {
+        let argv = |s: &str| {
+            std::iter::once("allowit")
+                .chain(s.split(' '))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let id = "Xg7IxRXCr2MhVdRrTFoYKeAw2iV4u463";
+        for (line, expected) in [
+            (format!("{id} help"), format!("policy-help --id={id}")),
+            (
+                format!("{id} help --json"),
+                format!("policy-help --id={id} --json"),
+            ),
+            (
+                format!("--json -q {id} help"),
+                format!("--json -q policy-help --id={id}"),
+            ),
+            (
+                format!("--rail example:testnet --config-dir=/tmp/x {id} help"),
+                format!("--rail example:testnet --config-dir=/tmp/x policy-help --id={id}"),
+            ),
+            // An id can start with a hyphen.
+            (
+                "-1WagPbql_eK8CwzC4dxHJDMtC5wilVg help".to_owned(),
+                "policy-help --id=-1WagPbql_eK8CwzC4dxHJDMtC5wilVg".to_owned(),
+            ),
+            // Also with the letter of a short value flag.
+            (
+                "-nWagPbql_eK8CwzC4dxHJDMtC5wilVg help".to_owned(),
+                "policy-help --id=-nWagPbql_eK8CwzC4dxHJDMtC5wilVg".to_owned(),
+            ),
+            // Short flags in their attached and combined forms.
+            (
+                format!("-nexample:testnet -qy {id} help"),
+                format!("-nexample:testnet -qy policy-help --id={id}"),
+            ),
+        ] {
+            assert_eq!(
+                policy_help_argv(&argv(&line)),
+                Some(argv(&expected)),
+                "{line}"
+            );
+            assert!(
+                matches!(parse(&argv(&expected), false), Parsed::Run(_)),
+                "{expected}"
+            );
+        }
+        // Help of a command, plain help and other words stay as they are.
+        for line in [
+            "help",
+            "keys help",
+            "completion help",
+            "wallet help",
+            "help keys",
+            "short help",
+            "--json help",
+            id,
+            &format!("{id} show"),
+            &format!("keys {id} help"),
+        ] {
+            assert_eq!(policy_help_argv(&argv(line)), None, "{line}");
+        }
     }
     #[test]
     fn waits_parse_and_are_bounded() {

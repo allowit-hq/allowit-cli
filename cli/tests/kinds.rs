@@ -125,7 +125,7 @@ fn a_retired_or_unknown_kind_is_a_usage_error_before_any_access() {
 }
 
 #[test]
-fn a_missing_server_url_and_an_untrusted_server_have_their_own_errors() {
+fn an_unset_server_url_is_the_production_server_and_an_untrusted_server_has_its_own_error() {
     every_rail(|rail| {
         let net = rail.network;
         let mut sandbox = Sandbox::new("server");
@@ -133,28 +133,36 @@ fn a_missing_server_url_and_an_untrusted_server_have_their_own_errors() {
         sandbox.set("ALLOWIT_URL", "");
         sandbox.ok(&["rail", "use", net]);
         sandbox.ok(&["keys", "generate", "owner"]);
-        // No ALLOWIT_URL: the error names the variable, not server trust.
+        // No ALLOWIT_URL: the server is the production origin, and the configuration says so.
+        let production = allowit_sdk::config::parse_origin("").unwrap();
+        assert!(production.starts_with("https://"), "{production}");
+        let shown = sandbox.json(&["config", "show"]);
+        assert_eq!(shown["engineUrl"], production.as_str());
+        assert_eq!(shown["engineUrlSource"], "default");
         for kind in wallet_kinds(net).unwrap() {
             // A rail installs every kind that it advertises, so `--kind` is
             // never refused as a usage error for a listed kind.
             assert!(installed(net, kind.id), "{net}: {}", kind.id.id());
+            // The request goes to the production origin, which this sandbox cannot reach.
             let output = sandbox.run(&generate(net, kind.id.id()));
-            assert_eq!(code(&output), Some(3), "{}", stderr(&output));
-            assert_eq!(
-                stderr(&output),
-                "error: ALLOWIT_URL is not set; set it to the URL of the Allowit server\n"
-            );
+            assert_ne!(code(&output), Some(0), "{}", stderr(&output));
+            assert!(!stderr(&output).contains("ALLOWIT_URL is not set"));
         }
         let profile: Value = serde_json::from_slice(&rail.fixtures.public_profile).unwrap();
         common::public_profile_fixture(&sandbox, &profile, "http://127.0.0.1:1");
         let status = ["--rail", net, "status", "pay-0001"];
+        // The production origin has no pinned identity here: the error names it.
         let output = sandbox.run(&status);
         assert_eq!(code(&output), Some(3), "{}", stderr(&output));
         assert!(
-            stderr(&output).starts_with("error: ALLOWIT_URL is not set"),
+            stderr(&output).starts_with(&format!(
+                "error: no trusted server key for {production} on {net}"
+            )),
             "{}",
             stderr(&output)
         );
+        let named = sandbox.json(&["config", "show"]);
+        assert_eq!(named["engineUrlSource"], "default");
         // A URL without a pinned identity: the error names the origin and the command.
         let mock = Mock::new();
         sandbox.set("ALLOWIT_URL", &mock.url);

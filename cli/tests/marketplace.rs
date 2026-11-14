@@ -198,10 +198,12 @@ fn skills_search_ls_and_show_read_the_configured_server_only() {
     let long = "a".repeat(300);
     assert_eq!(code(&sandbox.run(&["skills", "search", &long])), Some(2));
     assert_eq!(engine.seen().len(), before);
-    // Without a configured server the command fails before any request.
+    // Without ALLOWIT_URL the command asks the production server, which this sandbox cannot
+    // reach: a network failure, and no request to the configured engine.
     let mut unset = Sandbox::new("skills-unset");
     unset.set("ALLOWIT_URL", "");
-    assert_eq!(code(&unset.run(&["skills", "ls"])), Some(3));
+    assert_eq!(code(&unset.run(&["skills", "ls"])), Some(7));
+    assert_eq!(engine.seen().len(), before);
 }
 
 #[test]

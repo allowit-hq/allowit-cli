@@ -118,14 +118,13 @@ impl Ctx {
         }
         Ok(self.settings()?.rail(rail.id).rpc_url)
     }
-    /// The Allowit server URL from `ALLOWIT_URL`. A command that needs the
-    /// server fails here, before any key access, when the URL is not set.
+    /// The Allowit server URL: `ALLOWIT_URL`, or the production server when
+    /// the variable is unset or empty. Every other environment names its
+    /// server with the variable.
     pub(crate) fn server_url(&self) -> Result<String> {
         let url = crate::config::env_value("ALLOWIT_URL");
         if url.trim().is_empty() {
-            return Err(Error::config(
-                "ALLOWIT_URL is not set; set it to the URL of the Allowit server",
-            ));
+            return crate::config::parse_origin("");
         }
         Ok(url)
     }
