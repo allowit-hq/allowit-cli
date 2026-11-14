@@ -105,7 +105,14 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
         (None, Some((_, name, origin))) => {
             cx.out
                 .progress("Reading the build ticket with the owner session");
-            let session = owner::load_for_server(cx, name)?;
+            // The owner signs in to the server whose key this run trusts: the key of the command,
+            // or the pinned one.
+            let rail = cx.rail()?;
+            let key = trusted_key(cx, rail, &server, a.server_key.as_deref())?;
+            let origin_of_server = crate::config::parse_origin(&server)?;
+            let authority =
+                allowit_sdk::config::ServerAuthority::new(rail.id, &origin_of_server, &key)?;
+            let session = owner::load_for_authority(cx, name, authority)?;
             custom_build::owner_view(&session.context(origin), &a.policy_id)?.ticket
         }
         (None, None) => {

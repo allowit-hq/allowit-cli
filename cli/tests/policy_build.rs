@@ -281,3 +281,37 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
         assert_eq!(requests.len(), 1);
     });
 }
+
+#[test]
+fn an_owner_key_with_the_server_key_of_the_command_needs_no_pinned_key() {
+    each_rail(Feature::CustomBuild, |rail| {
+        let server = Key::of(rail, 1);
+        let mut sandbox = Sandbox::new("build-owner-key");
+        sandbox.ok(&["--rail", rail.network, "rail", "use", rail.network]);
+        sandbox.ok(&["keys", "generate", "owner"]);
+        // No `rail trust` ran. The command names the server key, so the owner signs in with it.
+        let (output, requests) = served(
+            &mut sandbox,
+            &[
+                "policy",
+                "build",
+                ID,
+                "--owner-key",
+                "owner",
+                "--origin",
+                "http://localhost:5173",
+                "--server-key",
+                server.address(),
+            ],
+            vec![(503, json!({"error": "unavailable"}))],
+        );
+        assert_ne!(code(&output), Some(0));
+        assert!(
+            !stderr(&output).contains("no trusted server key"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(requests.len(), 1, "{}", stderr(&output));
+        assert!(requests[0].starts_with("POST /api/auth/"), "{requests:?}");
+    });
+}
