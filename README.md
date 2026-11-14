@@ -4,6 +4,14 @@ The `allowit` command provides developer workflows, local key custody, portable 
 
 **Go on. On your terms.**
 
+Install the command (a release binary when one exists, otherwise a source build; see the [CLI reference](cli/README.md#install)):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh
+```
+
+An agent starts with the line that its owner copied from the app: `allowit POLICY_ID help`.
+
 Build and test with Rust 1.98 or later:
 
 ```sh

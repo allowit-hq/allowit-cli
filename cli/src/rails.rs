@@ -409,9 +409,9 @@ impl Rail {
                     "Original signed operations support receipt recovery only",
                 ));
             }
-            // A retained operation holds its own server origin; ALLOWIT_URL
-            // serves only a record without one, so it may be unset here.
-            let server = env_value("ALLOWIT_URL");
+            // A retained operation holds its own server origin; ALLOWIT_URL,
+            // or the production server, serves only a record without one.
+            let server = cx.server_url()?;
             let signer = self.signer(cx)?;
             let payment = self.retained_payment_limits(
                 cx,
@@ -479,11 +479,11 @@ impl Rail {
             None => self.retained_payment_limits(cx, &binding),
         };
         let out = if let Some(recovery) = binding.recovery {
-            // The journal's origin serves a retained request. ALLOWIT_URL is
-            // the fallback for a record without one, and may be unset.
+            // The journal's origin serves a retained request. ALLOWIT_URL, or
+            // the production server, is the fallback for a record without one.
             let server = match backend {
                 Some(origin) => origin.to_owned(),
-                None => env_value("ALLOWIT_URL"),
+                None => cx.server_url()?,
             };
             crate::flush_stderr(&mut cx.out.stderr);
             allowit_sdk::execution::recover(recovery, signer, &server, &root, id, wait, None)?

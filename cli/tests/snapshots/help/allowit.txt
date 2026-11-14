@@ -3,6 +3,7 @@ AllowIt: policy wallets for agents. Go on. On your terms.
 Usage: allowit [OPTIONS] [COMMAND]
 
 Examples:
+  allowit POLICY_ID help
   allowit rail use <rail>
   allowit keys generate agent
   allowit exec --op transfer --to DESTINATION --amount ASSET:5

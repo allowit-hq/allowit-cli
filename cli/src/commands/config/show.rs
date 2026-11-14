@@ -23,17 +23,16 @@ pub(crate) fn run(_: Args, cx: &mut Ctx) -> Result<i32> {
     let settings = cx.settings()?;
     let path = crate::settings::Settings::path(&settings.dir);
     let config = serde_json::to_value(&settings.config).unwrap_or_default();
-    let url = env_value("ALLOWIT_URL");
-    let engine_url = if url.is_empty() {
-        serde_json::Value::Null
-    } else {
-        json!(url)
-    };
+    // An unset variable means the production server.
+    let implicit = env_value("ALLOWIT_URL").trim().is_empty();
+    let engine_url = json!(cx.server_url()?);
+    let engine_url_source = if implicit { "default" } else { "ALLOWIT_URL" };
     let value = json!({
         "path": path.to_string_lossy(),
         "rail": rail,
         "railSource": rail_source,
         "engineUrl": engine_url,
+        "engineUrlSource": engine_url_source,
         "config": config,
     });
     cx.out.value(&value);

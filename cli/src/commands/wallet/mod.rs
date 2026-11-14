@@ -17,6 +17,7 @@ Examples:
 /// Select and inspect installed policy wallets
 #[derive(Subcommand, Debug)]
 pub(crate) enum Command {
+    #[command(before_help = import::EXAMPLES)]
     Import(import::Args),
     #[command(before_help=setup::EXAMPLES)]
     Setup(setup::Args),

@@ -79,6 +79,9 @@ fn usage_error(json: bool, first_line: &str, text: &str) {
 pub fn run(args: Vec<String>) -> i32 {
     let mut argv = vec!["allowit".to_owned()];
     argv.extend(args);
+    if let Some(rewritten) = commands::policy_help_argv(&argv) {
+        argv = rewritten;
+    }
     // Before parsing, so that parse errors honor them too.
     let json = json_requested(&argv);
     let no_color = argv

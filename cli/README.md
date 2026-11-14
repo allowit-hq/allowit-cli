@@ -13,6 +13,53 @@ cargo run --locked --bin allowit -- --help
 cargo build --locked --release --bin allowit
 ```
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh
+```
+
+[`install.sh`](../install.sh) installs `allowit` to `~/.local/bin` and prints the version with the build revision.
+It takes a release binary when the GitHub release has one for the system, and checks its SHA-256 against the
+release's `SHA256SUMS` file before it installs anything. Otherwise it says so and builds from source with cargo at
+one exact commit. It installs Rust with rustup when cargo is missing, and as root on a system with `apt-get` the
+missing build tools. A root shell without `~/.local/bin` on `PATH` gets a link in `/usr/local/bin`.
+`ALLOWIT_INSTALL_DIR`, `ALLOWIT_VERSION`, `ALLOWIT_REF`, `ALLOWIT_FROM_SOURCE=1`, `ALLOWIT_NO_DEPS=1`,
+`ALLOWIT_RELEASE_URL` and `ALLOWIT_DRY_RUN=1` change that; the script's header describes each one.
+A release serves the installer with `allowit-<target>.tar.gz` for `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and `aarch64-apple-darwin`, each holding the `allowit` binary,
+and one `SHA256SUMS` file.
+
+## Agent start: `allowit POLICY_ID help`
+
+The app gives the owner one line for the agent: an install URL and `allowit POLICY_ID help`.
+The command reads the public facts of that policy from the server and prints the agent's next commands in order,
+with the real values. `--json` prints the same as data.
+
+```sh
+allowit POLICY_ID help                                # the production server
+ALLOWIT_URL=https://staging.example allowit POLICY_ID help
+```
+
+| State | What the command prints |
+| --- | --- |
+| `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`, `keys fund agent` on a test network; then report the public key to the owner and run the command again |
+| `draft` | The owner has the key and has not signed: wait and run the command again |
+| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `rail trust ORIGIN KEY`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the limits in the asset's unit |
+| `inactive` | Ask the owner |
+
+The command changes nothing. It pins no server key and imports no profile: the printed key is the server's own
+claim, and the owner compares it with the key that the app shows under Agent access before the agent runs
+`rail trust`. A device that holds no key for the policy's agent public key gets no setup and no payment command.
+Every server value that enters a printed command is checked: an address of the rail, or a plain URL without a
+character that a shell interprets. The command exits 4 with `policy_unknown` for an id that the server does not
+have, and 7 when the server does not answer.
+`wallet import --policy POLICY_ID` reads the same public profile from the server and verifies it as a file import
+does: against the pinned server key and the rail's own endpoint. `rail use RAIL --rpc-url URL` keeps the endpoint
+for that rail, so later commands need no flag.
+[`skills/allowit/SKILL.md`](skills/allowit/SKILL.md) is the agent skill for the whole journey; `allowit guide`
+prints it.
+
 ## Architecture
 
 The CLI owns developer workflows for policies, agent keypairs, validation and the x402 marketplace.
@@ -33,7 +80,8 @@ flowchart TB
 ## Commands
 
 ```
-allowit rail ls | show [RAIL] | use RAIL | trust ORIGIN PUBLIC_KEY
+allowit POLICY_ID help
+allowit rail ls | show [RAIL] | use RAIL [--rpc-url URL] | trust ORIGIN PUBLIC_KEY
 allowit keys generate NAME
 allowit keys add NAME --public-key ADDR
 allowit keys import NAME FILE|-
@@ -41,7 +89,7 @@ allowit keys use NAME
 allowit keys ls | show NAME | fund NAME | export NAME | rm NAME
 allowit config show | path
 allowit wallet ls | show | use ADDR [--profile VERSION]
-allowit wallet import PROFILE_FILE
+allowit wallet import PROFILE_FILE | --policy POLICY_ID
 allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID
 allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
@@ -164,7 +212,8 @@ Use `policy export` after activation, or `wallet import FILE --rpc-url URL` for 
 Then inspect it with `wallet show` and `policy show`.
 Each vendor plugin describes its public profile configuration and native request formats.
 [Known issues](../known_issues.md) describes compatibility with older exports.
-`ALLOWIT_URL` selects the server origin for owner requests and profile import.
+`ALLOWIT_URL` selects the server origin for owner requests and profile import. Without it the server is the
+production origin, `https://app.allowit.xyz`; `config show` names the origin and whether it is the default.
 The SDK retains that origin with each cached profile. Selecting an address does not fetch or import a profile.
 
 Use only commands and operations advertised by `rail show`.
@@ -278,7 +327,7 @@ material. Calling paid remote MCP servers (payment inside an MCP session) is not
 Data goes to stdout. Diagnostics, generated request IDs and the progress of long steps go to stderr.
 `-q` drops progress. With `--json`, progress is silent unless `-v` is set; each step is then one `{"progress":{"message":…}}` object on stderr.
 A typed server refusal keeps the server's code: text prints `error: CODE: MESSAGE`, and the JSON error has `api_code`.
-A command that needs the server exits 3 when `ALLOWIT_URL` is not set, and names the origin when `rail trust` has no key for it.
+A command that needs the server uses the production origin when `ALLOWIT_URL` is not set, and names the origin when `rail trust` has no key for it.
 Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables prompts and color and makes `--json` output compact.
 `--build-only` prints the unsigned request in the same format. Destructive commands need `--yes` without a terminal.
 
@@ -306,7 +355,7 @@ Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables p
 - [`src/rails.rs`](src/rails.rs) connects commands to the rails that the SDK registers. Address and amount checks come from the SDK.
 - `src/settings/` owns caller configuration, private keys and local request records.
 - `src/ctx.rs` resolves caller settings. `src/term.rs` renders output.
-- [`templates/policy/`](templates/policy/) contains the policy crate. [`skills/allowit/`](skills/allowit/SKILL.md) describes authoring.
+- [`templates/policy/`](templates/policy/) contains the policy crate. [`skills/allowit/`](skills/allowit/SKILL.md) is the agent skill: paying within a policy. [`skills/allowit-policy-authoring/`](skills/allowit-policy-authoring/SKILL.md) describes authoring.
 
 Help snapshots live in `tests/snapshots/help/`. They show `<rail>` in place of each registered rail identifier.
 Shared tests run once for each registered rail and take every address, asset and profile from the rail's fixtures. A rail skips a test of a feature that it does not serve.
