@@ -45,7 +45,7 @@ mod tests {
         let guide = super::guide("example:testnet");
         assert!(!guide.starts_with("---"), "front matter is not guide text");
         assert!(guide.starts_with("# Pay within an Allowit policy"));
-        assert!(guide.split_whitespace().count() <= 420, "the skill grew");
+        assert!(guide.split_whitespace().count() <= 450, "the skill grew");
         for part in [
             "install.sh",
             "allowit POLICY_ID help",
@@ -59,6 +59,7 @@ mod tests {
             "allowit history",
             "- 20: the policy denied the request",
             "pay from your own account",
+            "pay without a request from the owner",
             "keys export",
         ] {
             assert!(guide.contains(part), "{part}");

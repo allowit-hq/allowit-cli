@@ -186,6 +186,7 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
             "  allowit history".into(),
             "Payment limit".into(),
             "1 UNIT".into(),
+            "Pay only when the owner asks, and only that amount.".into(),
             "Exit 20 means the policy denied the request.".into(),
         ];
         let mut at = 0;
