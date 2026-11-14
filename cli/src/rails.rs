@@ -401,10 +401,12 @@ impl Rail {
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
     }
-    /// Where the charge of the request `id` under `binding` is read: the
-    /// server of its profile; for a retained request without a profile, the
-    /// origin that the journal keeps for it (`backend`, or the journal entry
-    /// of `id`); else `ALLOWIT_URL` or the production server. And its policy.
+    /// Where the charge of the request `id` under `binding` is read, and its
+    /// policy. The server is the one of the profile. A retained request has
+    /// no profile: its server is the origin that the journal keeps for it
+    /// (`backend`, or the journal entry of `id`). The retained operation
+    /// itself does not show its origin, so a retained request without a
+    /// journal origin reads no charge: `ALLOWIT_URL` can name another server.
     pub(crate) fn charge_lookup(
         &self,
         cx: &mut Ctx,
@@ -424,7 +426,13 @@ impl Rail {
                     .flatten()?
                     .server_origin
             })
-            .or_else(|| cx.server_url().ok());
+            .or_else(|| {
+                binding
+                    .recovery
+                    .is_none()
+                    .then(|| cx.server_url().ok())
+                    .flatten()
+            });
         crate::credits::Lookup::new(origin, binding.policy.clone())
     }
     /// Sends one request and returns its outcome with the per-payment limits

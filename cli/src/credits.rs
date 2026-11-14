@@ -198,11 +198,18 @@ pub(crate) fn explained(code: &str) -> Option<Explained> {
     })
 }
 
-/// True for a denial that Allowit charged: a policy denial, or a metered call
-/// that the credits or the allowance did not cover.
+/// The server code of a denial by the server's policy runner. Allowit charges it.
+pub(crate) const RUNNER_DENIED: &str = "server_policy_denied";
+
+/// True for a denial that Allowit charged: a policy denial, a denial of the
+/// server's policy runner, or a metered call that the credits or the
+/// allowance did not cover.
 pub(crate) fn charged_denial(error: &Error) -> bool {
     error.code == crate::exit::Exit::Denied.code()
-        || matches!(error.api_code.as_deref(), Some(INSUFFICIENT | ALLOWANCE))
+        || matches!(
+            error.api_code.as_deref(),
+            Some(INSUFFICIENT | ALLOWANCE | RUNNER_DENIED)
+        )
 }
 
 #[cfg(test)]
@@ -259,6 +266,29 @@ mod tests {
         );
         assert!(explained(RUNNING).unwrap().fix.contains("allowit status"));
         assert!(explained("policy_denied").is_none());
+    }
+
+    #[test]
+    fn every_charged_denial_reads_its_charge() {
+        let mut policy = Error::api(409, "The policy denied this operation");
+        policy.code = 20;
+        assert!(charged_denial(&policy));
+        // The server's policy runner denies with its own code and status.
+        for (status, code) in [(403, RUNNER_DENIED), (409, INSUFFICIENT), (409, ALLOWANCE)] {
+            assert!(charged_denial(&Error::refused(status, code, "x")), "{code}");
+        }
+        // A refusal before the evaluation charged nothing.
+        for (status, code) in [
+            (402, EXHAUSTED),
+            (409, RUNNER_DENIED.trim_end_matches('d')),
+            (409, "wallet_rejected"),
+        ] {
+            assert!(
+                !charged_denial(&Error::refused(status, code, "x")),
+                "{code}"
+            );
+        }
+        assert!(!charged_denial(&Error::uncertain("no answer")));
     }
 
     #[test]
