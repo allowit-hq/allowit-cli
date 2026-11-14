@@ -310,7 +310,7 @@ is that update. The wallet keeps its recorded usage and its request nonce: an up
 the policy has spent. A request that the agent prepared before the update is stale; the agent sends it again.
 Resume an interrupted update with the same `--request-id` and arguments: the CLI sends the saved signed step and
 asks for no second signature. A resumed update keeps the values of its first run, also when a new expiry among
-them has passed since. `--expected-revision N` refuses the update when the wallet is at another revision.
+them has passed since: the server checks an expiry against its clock when it prepares a new step. `--expected-revision N` refuses the update when the wallet is at another revision.
 The printed document selects the wallet with its new values, and its request ID exports the updated public profile
 as an activation ID does. The profile cache then holds the profile from before the update and the updated one:
 `wallet import` prints the `version` of the updated profile, and the agent selects it with
