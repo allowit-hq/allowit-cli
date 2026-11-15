@@ -410,6 +410,9 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
     // The proof holds the receipt as the server sent it; the shown receipt adds what its
     // evaluation cost the policy owner.
     lookup.attach(&mut receipt, &paid_by);
+    // The owner paid for the evaluation whatever the seller does next: an error after the
+    // payment shows the charge, and a delivered resource shows it in its receipt.
+    cx.out.credits = crate::credits::Charge::of(&receipt[crate::credits::KEY]);
     crate::flush_stderr(&mut cx.out.stderr);
     allowit_sdk::progress::report("Presenting the proof of payment to the seller");
     let second = paid_service::send(&request, Some(&proof)).map_err(|error| {
@@ -424,6 +427,8 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
             second.status
         )));
     }
+    // The resource is delivered: its receipt carries the charge.
+    cx.out.credits = None;
     Ok(delivered(
         second,
         Some(Payment {
