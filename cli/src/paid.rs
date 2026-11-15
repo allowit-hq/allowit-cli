@@ -239,6 +239,9 @@ fn pay(
         }
     };
     if outcome.status != Status::Confirmed {
+        // The payment was evaluated, whatever its transaction did: the error shows what
+        // that cost the owner. A resumed payment names its original request.
+        cx.out.credits = lookup.read(&paid_by);
         let mut error = Error::uncertain(format!(
             "the payment of request {paid_by} is not confirmed; run the command again with --request-id {paid_by}: it resumes this payment and never pays twice"
         ));

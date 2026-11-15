@@ -365,7 +365,7 @@ mod display_tests {
         let refused = Error::refused(
             402,
             "credits_exhausted",
-            "Stellar operation was not resolved: Allowit did not evaluate this request; retain the original request ID",
+            "The operation was not resolved: Allowit did not evaluate this request; retain the original request ID",
         );
         assert_eq!(refused.code, 4);
         let mut out = crate::term::Out::new(false, true, false, true);
@@ -394,7 +394,7 @@ mod display_tests {
         );
         assert!(error["fix"].as_str().unwrap().contains("Tell the owner"));
         assert_eq!(error["request_id"], "pay-0001");
-        assert!(!error["message"].as_str().unwrap().contains("Stellar"));
+        assert!(!error["message"].as_str().unwrap().contains("not resolved"));
         for code in [
             "credits_insufficient",
             "allowance_exhausted",
