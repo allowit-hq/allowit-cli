@@ -17,6 +17,7 @@ pub(crate) const VERSION_LINE: &str = concat!(
 );
 pub(crate) use allowit_sdk::{config, output, request};
 mod commands;
+mod credits;
 mod ctx;
 mod exit;
 mod kinds;
@@ -201,15 +202,23 @@ fn finish(mut out: Out, result: error::Result<i32>) -> i32 {
 /// stable code: `api_code` in JSON, and before the message in text. The
 /// `reason` of its details, such as why a wallet kind is refused, follows
 /// the message; the SDK bounds that text.
+///
+/// A refusal that names credits prints this CLI's own message with its cause
+/// and what the owner must do. A denial that Allowit charged carries the
+/// charge of its evaluation in `out.credits`: `credits` in JSON, one line in
+/// text.
 fn render_error(out: &mut Out, e: &Error) {
     let reason = e
         .detail("reason")
         .filter(|reason| !e.message.contains(reason));
+    let explained = e.api_code.as_deref().and_then(credits::explained);
+    let message = explained.as_ref().map_or(e.message.as_str(), |x| x.message);
+    let charge = out.credits.take();
     if out.json {
         let mut value = json!({"error":{
             "code": Exit::from_code(e.code).name(),
             "exit": e.code,
-            "message": e.message,
+            "message": message,
             "request_id": out.request_id,
         }});
         if let Some(code) = &e.api_code {
@@ -218,15 +227,28 @@ fn render_error(out: &mut Out, e: &Error) {
         if let Some(reason) = reason {
             value["error"]["reason"] = reason.into();
         }
+        if let Some(explained) = &explained {
+            value["error"]["cause"] = explained.cause.into();
+            value["error"]["fix"] = explained.fix.into();
+        }
+        if let Some(charge) = &charge {
+            value["error"][credits::KEY] = charge.document();
+        }
         out.stderr += &format!("{value}\n");
     } else {
         let label = out.error_label();
         match &e.api_code {
-            Some(code) => out.stderr += &format!("{label} {code}: {}\n", e.message),
-            None => out.stderr += &format!("{label} {}\n", e.message),
+            Some(code) => out.stderr += &format!("{label} {code}: {message}\n"),
+            None => out.stderr += &format!("{label} {message}\n"),
         }
         if let Some(reason) = reason {
             out.stderr += &format!("reason: {reason}\n");
+        }
+        if let Some(explained) = &explained {
+            out.stderr += &format!("cause: {}\nfix: {}\n", explained.cause, explained.fix);
+        }
+        if let Some(charge) = &charge {
+            out.stderr += &format!("credits: {}\n", charge.text());
         }
     }
 }
@@ -334,6 +356,92 @@ mod display_tests {
         let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
         assert!(value["error"].get("api_code").is_none());
         assert_eq!(value["error"]["exit"], 5);
+    }
+    /// A refusal for lack of credits prints the typed code, a plain cause and what the owner
+    /// must do. The rail's own text for an unresolved operation is not shown.
+    #[test]
+    fn a_refusal_for_lack_of_credits_says_the_cause_and_what_the_owner_must_do() {
+        use crate::error::Error;
+        let refused = Error::refused(
+            402,
+            "credits_exhausted",
+            "The operation was not resolved: Allowit did not evaluate this request; retain the original request ID",
+        );
+        assert_eq!(refused.code, 4);
+        let mut out = crate::term::Out::new(false, true, false, true);
+        super::render_error(&mut out, &refused);
+        assert_eq!(
+            out.stderr,
+            "error: credits_exhausted: Allowit did not evaluate this request: the owner of the policy has no credits left\n\
+             cause: Allowit charges the policy owner credits for each evaluation, and the owner's balance does not cover one. Nothing was signed or sent, and no credits were charged.\n\
+             fix: Tell the owner to get credits from Allowit; the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.\n"
+        );
+        let mut out = crate::term::Out::new(true, true, false, true);
+        out.request_id = Some("pay-0001".into());
+        super::render_error(&mut out, &refused);
+        let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+        let error = &value["error"];
+        assert_eq!(error["api_code"], "credits_exhausted");
+        assert_eq!(
+            (error["exit"].as_i64(), error["code"].as_str()),
+            (Some(4), Some("rejected"))
+        );
+        assert!(
+            error["cause"]
+                .as_str()
+                .unwrap()
+                .contains("Nothing was signed or sent")
+        );
+        assert!(error["fix"].as_str().unwrap().contains("Tell the owner"));
+        assert_eq!(error["request_id"], "pay-0001");
+        assert!(!error["message"].as_str().unwrap().contains("not resolved"));
+        for code in [
+            "credits_insufficient",
+            "allowance_exhausted",
+            "evaluation_running",
+        ] {
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(&mut out, &Error::refused(409, code, "the rail's text"));
+            assert!(
+                out.stderr.starts_with(&format!("error: {code}: ")),
+                "{}",
+                out.stderr
+            );
+            assert!(out.stderr.contains("\ncause: ") && out.stderr.contains("\nfix: "));
+            assert!(!out.stderr.contains("the rail's text"));
+        }
+    }
+    /// A denied request was evaluated, so its error shows what that cost the policy owner.
+    #[test]
+    fn a_denied_request_shows_the_credits_of_its_evaluation() {
+        use crate::error::Error;
+        let mut denied = Error::api(409, "The policy denied this operation: `payment_limit`");
+        denied.code = 20;
+        let charge = crate::credits::Charge::of(&serde_json::json!({
+            "charged": "1.0", "tariff": "2026-11-14", "lines": [{"item": "base", "credits": "1.0"}],
+        }))
+        .unwrap();
+        let mut out = crate::term::Out::new(false, true, false, true);
+        out.credits = Some(charge.clone());
+        super::render_error(&mut out, &denied);
+        assert_eq!(
+            out.stderr,
+            "error: Allowit returned HTTP 409: The policy denied this operation: `payment_limit`\n\
+             credits: 1.0, charged to the policy owner, price list 2026-11-14\n"
+        );
+        // The charge is printed once.
+        assert!(out.credits.is_none());
+        let mut out = crate::term::Out::new(true, true, false, true);
+        out.credits = Some(charge);
+        super::render_error(&mut out, &denied);
+        let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+        assert_eq!(value["error"]["exit"], 20);
+        assert_eq!(value["error"]["credits"]["charged"], "1.0");
+        assert_eq!(value["error"]["credits"]["paidBy"], "owner");
+        assert!(crate::credits::charged_denial(&denied));
+        assert!(!crate::credits::charged_denial(&Error::uncertain(
+            "no answer"
+        )));
     }
     #[test]
     fn progress_goes_to_stderr_text_and_stays_out_of_json_unless_verbose() {

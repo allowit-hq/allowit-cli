@@ -21,7 +21,7 @@ Exit codes:
 - 0: done. Report the request ID, the amount with its unit, the transaction and the explorer link.
 - 20: the policy denied the request. Stop. Tell the owner the rule that the error names, such as `payment_limit`. Do not retry, split the amount or use another route.
 - 5, 7, 12: uncertain or pending. Run `status ID`, or the same command with the same ID. Never use a new ID for the same payment.
-- 4: refused, for example a paused wallet. Ask the owner.
+- 4: refused, for example a paused wallet. Ask the owner. `credits_exhausted`: the owner has no Allowit credits left; you need none. Tell the owner, then run the same command again.
 - 3: the setup is incomplete. Follow the hint, or run help again.
 
 Never:

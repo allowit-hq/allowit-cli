@@ -158,13 +158,26 @@ fn tools() -> Value {
     ])
 }
 
-/// A failed tool call: the CLI error with its exit code and the server's code.
-fn tool_error(error: &Error, request_id: Option<&str>) -> Value {
+/// A failed tool call: the CLI error with its exit code and the server's code. A refusal that
+/// names credits carries this CLI's own message with its cause and what the owner must do, as
+/// the command line prints them, and a denial that Allowit charged carries `credits`.
+fn tool_error(
+    error: &Error,
+    request_id: Option<&str>,
+    charge: Option<crate::credits::Charge>,
+) -> Value {
     let exit = Exit::from_code(error.code);
+    let explained = error
+        .api_code
+        .as_deref()
+        .and_then(crate::credits::explained);
+    let message = explained
+        .as_ref()
+        .map_or(error.message.as_str(), |text| text.message);
     let mut detail = json!({
         "code": exit.name(),
         "exit": error.code,
-        "message": error.message,
+        "message": message,
     });
     if let Some(code) = &error.api_code {
         detail["api_code"] = code.as_str().into();
@@ -172,13 +185,26 @@ fn tool_error(error: &Error, request_id: Option<&str>) -> Value {
     if let Some(reason) = error.detail("reason") {
         detail["reason"] = reason.into();
     }
+    if let Some(explained) = &explained {
+        detail["cause"] = explained.cause.into();
+        detail["fix"] = explained.fix.into();
+    }
+    if let Some(charge) = &charge {
+        detail[crate::credits::KEY] = charge.document();
+    }
     if let Some(id) = request_id {
         detail["request_id"] = id.into();
     }
-    let summary = match &error.api_code {
-        Some(code) => format!("{} ({code}): {}", exit.name(), error.message),
-        None => format!("{}: {}", exit.name(), error.message),
+    let mut summary = match &error.api_code {
+        Some(code) => format!("{} ({code}): {message}", exit.name()),
+        None => format!("{}: {message}", exit.name()),
     };
+    if let Some(explained) = &explained {
+        summary.push_str(&format!(". {} {}", explained.cause, explained.fix));
+    }
+    if let Some(charge) = &charge {
+        summary.push_str(&format!(". Credits: {}", charge.text()));
+    }
     json!({
         "content": [{"type": "text", "text": summary}],
         "structuredContent": {"error": detail},
@@ -390,7 +416,10 @@ fn paid_call(
                 value,
             )
         }
-        Err(error) => tool_error(&error, cx.out.request_id.as_deref()),
+        Err(error) => {
+            let charge = cx.out.credits.take();
+            tool_error(&error, cx.out.request_id.as_deref(), charge)
+        }
     })
 }
 
@@ -421,7 +450,7 @@ fn call_tool(global: &Global, name: &str, arguments: &Value) -> std::result::Res
                             value,
                         )
                     }
-                    Err(error) => tool_error(&error, None),
+                    Err(error) => tool_error(&error, None, None),
                 },
             )
         }
@@ -434,7 +463,7 @@ fn call_tool(global: &Global, name: &str, arguments: &Value) -> std::result::Res
                     format!("entry {}", entry.id),
                     json!({"entry": entry, "note": DATA_NOTE}),
                 ),
-                Err(error) => tool_error(&error, None),
+                Err(error) => tool_error(&error, None, None),
             })
         }
         "call" => paid_call(global, arguments, "target"),
@@ -458,7 +487,10 @@ fn call_tool(global: &Global, name: &str, arguments: &Value) -> std::result::Res
                     format!("request {id}: {}", Exit::from_code(code).name()),
                     json!({"state": Exit::from_code(code).name(), "exit": code, "receipt": printed(&mut cx)}),
                 ),
-                Err(error) => tool_error(&error, Some(&id)),
+                Err(error) => {
+                    let charge = cx.out.credits.take();
+                    tool_error(&error, Some(&id), charge)
+                }
             })
         }
         "wallet_show" => {
@@ -467,7 +499,7 @@ fn call_tool(global: &Global, name: &str, arguments: &Value) -> std::result::Res
             let result = in_rail(&mut cx, wallet::show);
             Ok(match result {
                 Ok(_) => tool_result("wallet".into(), json!({"wallet": printed(&mut cx)})),
-                Err(error) => tool_error(&error, None),
+                Err(error) => tool_error(&error, None, None),
             })
         }
         other => Err(format!("unknown tool {other:?}")),
@@ -792,7 +824,7 @@ mod tests {
             .with_details(json!({"reason": "destinations"}));
         let mut denied = denied;
         denied.code = Exit::Denied.code();
-        let result = tool_error(&denied, Some("paid-0001"));
+        let result = tool_error(&denied, Some("paid-0001"), None);
         assert_eq!(result["isError"], true);
         let detail = &result["structuredContent"]["error"];
         assert_eq!(detail["code"], "denied");
@@ -807,12 +839,51 @@ mod tests {
                 .contains("policy_denied")
         );
         // A price above the bound and a seller failure keep their own codes.
-        let price = tool_error(&crate::exit::price_exceeded("above the bound"), None);
+        // A refusal that names credits tells the agent the cause and what the owner must do,
+        // as the command line does, and never the rail's text for an unresolved operation.
+        let allowance = Error::refused(
+            409,
+            "allowance_exhausted",
+            "the operation was not resolved; retain the original request ID",
+        );
+        let result = tool_error(&allowance, Some("paid-0002"), None);
+        let detail = &result["structuredContent"]["error"];
+        assert_eq!(detail["api_code"], "allowance_exhausted");
+        assert!(detail["fix"].as_str().unwrap().contains("new request ID"));
+        assert!(
+            !detail["message"]
+                .as_str()
+                .unwrap()
+                .contains("retain the original")
+        );
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("raise the analysis allowance"), "{text}");
+        assert!(!text.contains("retain the original"), "{text}");
+        // A denial that Allowit charged carries what its evaluation cost the owner.
+        let charge = crate::credits::Charge::of(&json!({
+            "charged": "1.0", "tariff": "2026-11-14", "lines": [{"item": "base", "credits": "1.0"}],
+        }));
+        let result = tool_error(&denied, Some("paid-0001"), charge);
+        assert_eq!(
+            result["structuredContent"]["error"]["credits"]["charged"],
+            "1.0"
+        );
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("Credits: 1.0, charged to the policy owner, price list 2026-11-14")
+        );
+        let price = tool_error(&crate::exit::price_exceeded("above the bound"), None, None);
         assert_eq!(
             price["structuredContent"]["error"]["code"],
             "price_exceeded"
         );
-        let seller = tool_error(&allowit_sdk::paid_service::seller_failed("HTTP 500"), None);
+        let seller = tool_error(
+            &allowit_sdk::paid_service::seller_failed("HTTP 500"),
+            None,
+            None,
+        );
         assert_eq!(seller["structuredContent"]["error"]["exit"], 8);
         // Without configuration a tool fails closed with a clear message.
         let global = global();
