@@ -24,7 +24,7 @@ pub(crate) const INSUFFICIENT: &str = "credits_insufficient";
 pub(crate) const ALLOWANCE: &str = "allowance_exhausted";
 /// The server is evaluating the same request now.
 pub(crate) const RUNNING: &str = "evaluation_running";
-/// The server could not save the charge, so it released no decision.
+/// The server's credit ledger did not answer, so the server released no decision.
 pub(crate) const UNAVAILABLE: &str = "credits_unavailable";
 
 /// What the evaluation of one request cost its policy owner.
@@ -197,8 +197,8 @@ pub(crate) fn explained(code: &str) -> Option<Explained> {
             fix: "Read the request with `allowit status ID --wait 60s`, with the same request ID.",
         },
         UNAVAILABLE => Explained {
-            message: "Allowit could not save the charge of this request, so it released no decision",
-            cause: "The credit ledger of the server did not answer. Nothing was signed or sent.",
+            message: "Allowit released no decision: its credit ledger did not answer",
+            cause: "The server could not reserve or save the charge of this request. Nothing was signed or sent.",
             fix: "Run the same command again with the same request ID.",
         },
         _ => return None,

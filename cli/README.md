@@ -348,7 +348,7 @@ Allowit charges the owner of a policy credits for each request that it evaluates
 | `credits_insufficient` | 4 | The policy needed a metered call that the owner's credits do not cover. The request is denied. | Tell the owner to get credits. Then send a new request ID. |
 | `allowance_exhausted` | 4 | The analysis allowance of the policy is used up for today. The request is denied. | Tell the owner to raise the allowance in the app, or wait until 00:00 UTC. Then send a new request ID. |
 | `evaluation_running` | 4 | The server is evaluating the same request ID now. | Run `allowit status ID --wait 60s`. |
-| `credits_unavailable` | 4 | The server could not save the charge, so it released no decision. | Run the same command again with the same request ID. |
+| `credits_unavailable` | 4 | The server's credit ledger did not answer, so the server released no decision. | Run the same command again with the same request ID. |
 
 ### Exit codes
 
