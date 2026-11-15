@@ -190,7 +190,7 @@ fn pay(
     request: &str,
     request_id: String,
     wait: Duration,
-) -> Result<(Value, Vec<PaymentLimit>, String)> {
+) -> Result<(Value, Vec<PaymentLimit>, String, crate::credits::Lookup)> {
     let planned = exec::plan(
         exec::RequestArgs {
             op: "transfer".into(),
@@ -207,6 +207,7 @@ fn pay(
         cx,
     )?;
     let adapter = planned.adapter;
+    let lookup = adapter.charge_lookup(cx, &planned.binding, None, &request_id);
     let result = adapter.exec_outcome(cx, &planned.request, planned.binding);
     let code = match &result {
         Ok((outcome, _)) => exit::execution_status(outcome.status.clone()).code(),
@@ -229,9 +230,18 @@ fn pay(
             let (outcome, payment) = adapter.status_outcome(cx, &original, binding, wait, None)?;
             (outcome, payment, original)
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            // A denied payment was evaluated: its error shows what that cost the owner.
+            if crate::credits::charged_denial(&error) {
+                cx.out.credits = lookup.read(&request_id);
+            }
+            return Err(error);
+        }
     };
     if outcome.status != Status::Confirmed {
+        // The payment was evaluated, whatever its transaction did: the error shows what
+        // that cost the owner. A resumed payment names its original request.
+        cx.out.credits = lookup.read(&paid_by);
         let mut error = Error::uncertain(format!(
             "the payment of request {paid_by} is not confirmed; run the command again with --request-id {paid_by}: it resumes this payment and never pays twice"
         ));
@@ -239,7 +249,7 @@ fn pay(
         error.code = exit::execution_status(outcome.status).code();
         return Err(error);
     }
-    Ok((outcome.document, payment, paid_by))
+    Ok((outcome.document, payment, paid_by, lookup))
 }
 
 fn delivered(reply: SellerResponse, payment: Option<Payment>) -> Delivered {
@@ -394,8 +404,15 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
-    let (receipt, payment_limits, paid_by) = pay(cx, &challenge, &digest, request_id, call.wait)?;
+    let (mut receipt, payment_limits, paid_by, lookup) =
+        pay(cx, &challenge, &digest, request_id, call.wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
+    // The proof holds the receipt as the server sent it; the shown receipt adds what its
+    // evaluation cost the policy owner.
+    lookup.attach(&mut receipt, &paid_by);
+    // The owner paid for the evaluation whatever the seller does next: an error after the
+    // payment shows the charge, and a delivered resource shows it in its receipt.
+    cx.out.credits = crate::credits::Charge::of(&receipt[crate::credits::KEY]);
     crate::flush_stderr(&mut cx.out.stderr);
     allowit_sdk::progress::report("Presenting the proof of payment to the seller");
     let second = paid_service::send(&request, Some(&proof)).map_err(|error| {
@@ -410,6 +427,8 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
             second.status
         )));
     }
+    // The resource is delivered: its receipt carries the charge.
+    cx.out.credits = None;
     Ok(delivered(
         second,
         Some(Payment {

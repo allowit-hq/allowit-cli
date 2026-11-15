@@ -333,6 +333,25 @@ A command that needs the server uses the production origin when `ALLOWIT_URL` is
 Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables prompts and color and makes `--json` output compact.
 `--build-only` prints the unsigned request in the same format. Destructive commands need `--yes` without a terminal.
 
+### Credits
+
+Allowit charges the owner of a policy credits for each request that it evaluates, also for a denied one. The agent holds no credits and needs none.
+
+- `allowit POLICY_ID help` prints what one request costs the owner, and says when the owner has no credits left.
+- The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each priced item and the price list version. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `GET /api/agent/charge` of the policy's server; a server that does not answer leaves the receipt without the row.
+- A policy denial (exit 20) prints the same `credits:` line on stderr, and `error.credits` in JSON. A denied request ID keeps its decision: use a new request ID to ask again.
+- A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON.
+
+| Code | Exit | Meaning | What to do |
+| --- | --- | --- | --- |
+| `credits_exhausted` | 4 | The owner cannot pay one evaluation. Allowit evaluated nothing, signed nothing and charged nothing. | Tell the owner to get credits from Allowit. Then run the same command with the same request ID. |
+| `credits_insufficient` | 4 | The policy needed a metered call that the owner's credits do not cover. The request is denied. | Tell the owner to get credits. Then send a new request ID. |
+| `allowance_exhausted` | 4 | The analysis allowance of the policy is used up for today. The request is denied. | Tell the owner to raise the allowance in the app, or wait until 00:00 UTC. Then send a new request ID. |
+| `evaluation_running` | 4 | The server is evaluating the same request ID now. | Run `allowit status ID --wait 60s`. |
+| `credits_unavailable` | 4 | The server's credit ledger did not answer, so the server released no decision. | Run the same command again with the same request ID. |
+
+### Exit codes
+
 | Exit | Meaning |
 | --- | --- |
 | 0 | Success |
