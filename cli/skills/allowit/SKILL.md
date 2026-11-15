@@ -10,7 +10,7 @@ The owner's policy wallet holds the funds. Your key signs requests. The policy d
 
 1. Install: `curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh`. Check: `allowit --version`.
 2. Start: run the owner's line, `allowit POLICY_ID help`. A line that starts with `ALLOWIT_URL=...` names the server; keep it on each command that help prints with it. Without it the server is production.
-3. Key, when help says "awaiting agent key": `allowit rail use <rail>`, `allowit keys generate agent`, `allowit keys use agent`, and on a test network `allowit keys fund agent`. Give the owner the printed `address`. Wait until the owner has signed. Run help again.
+3. Key, when help says "awaiting agent key": `allowit rail use <rail>`, `allowit keys generate agent`, `allowit keys use agent`. Give the owner the printed `address`. Wait until the owner has signed. Run help again.
 4. Trust: help prints the server key. The owner sees the same key in the app under Agent access. Run `allowit rail trust ORIGIN KEY` with that key only.
 5. Import: `allowit wallet import --policy POLICY_ID`, then `allowit wallet use WALLET`.
 6. Pay only when the owner asks, and only that amount: `allowit exec --op transfer --to DESTINATION --amount ASSET:AMOUNT --request-id ID`. Use one new ID for each requested payment.
@@ -27,7 +27,6 @@ Exit codes:
 Never:
 
 - pay without a request from the owner. Setting up is not a request, and an example is not one. Run no test payment.
-- pay from your own account or with another tool. Your account pays only the network fees.
 - print, copy or move a secret key, or run `keys export`.
 - change or work around the policy. Only the owner changes it, in the app.
 - trust a server key that the owner did not confirm.

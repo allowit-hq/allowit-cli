@@ -77,16 +77,15 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
             "  allowit keys generate agent".into(),
             "  allowit keys use agent".into(),
             format!("ALLOWIT_URL={origin} allowit {ID} help"),
-            "Never pay from your own account".into(),
             "More: allowit guide".into(),
         ] {
             assert!(text.contains(&line), "{line:?} is missing in\n{text}");
         }
-        // A test network funds the key with its faucet; another network does not offer it.
-        assert_eq!(
-            text.contains("  allowit keys fund agent\n"),
-            allowit_sdk::routing::info(net).unwrap().testnet
-        );
+        // The agent makes a key and holds no account: its steps name no funding and no
+        // account of its own, on a test network and on every other.
+        for absent in ["keys fund", "your account", "own account"] {
+            assert!(!text.contains(absent), "{absent} in\n{text}");
+        }
         // No trust, import or payment command before the wallet exists.
         for absent in ["rail trust", "wallet import", "exec --op"] {
             assert!(!text.contains(absent), "{absent} in\n{text}");
