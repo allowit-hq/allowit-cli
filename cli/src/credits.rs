@@ -1,6 +1,8 @@
 //! Credits: what Allowit charges the owner of a policy for each request. The
 //! owner pays for compute, whatever the outcome: one credit for the request,
-//! and the model tokens that it used, in whole credits, rounded down.
+//! the model tokens that it used, and the fees that Allowit paid for it, such
+//! as the network fee of a settlement. The sum is rounded down once, to a
+//! whole credit.
 //!
 //! The agent holds no credits and needs none. This module reads what the
 //! evaluation of one request cost, for the receipt and the status, and it
@@ -46,10 +48,53 @@ pub(crate) struct Line {
     pub item: String,
     /// What the item adds to the charge.
     pub credits: String,
-    /// The exact use of a call that is priced by its tokens, in credits. The
-    /// item `inference` charges the whole credits of those calls together.
+    /// The exact cost of a call that is priced by its tokens, or of a fee, in
+    /// credits. The item `inference` charges the whole credits of those
+    /// costs together.
     pub cost: Option<String>,
+    /// A fee as it was paid in an asset, such as a network fee.
+    pub fee: Option<Fee>,
 }
+
+/// A fee as its payer paid it: the amount in its asset, the US dollar value
+/// of one unit that the price list took, and the transaction that paid it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Fee {
+    pub asset: String,
+    pub amount: String,
+    pub usd_per_asset: String,
+    pub transaction: Option<String>,
+}
+
+impl Fee {
+    /// The fee in a server document. Any text that is not a plain amount or
+    /// word is no fee.
+    fn of(value: &Value) -> Option<Self> {
+        Some(Self {
+            asset: word(value["asset"].as_str()?, 12)?,
+            amount: amount(value["amount"].as_str()?)?,
+            usd_per_asset: amount(value["usdPerAsset"].as_str()?)?,
+            transaction: match &value["transaction"] {
+                Value::Null => None,
+                transaction => Some(word(transaction.as_str()?, 128)?),
+            },
+        })
+    }
+    fn document(&self) -> Value {
+        let mut fee = json!({
+            "asset": self.asset,
+            "amount": self.amount,
+            "usdPerAsset": self.usd_per_asset,
+        });
+        if let Some(transaction) = &self.transaction {
+            fee["transaction"] = json!(transaction);
+        }
+        fee
+    }
+}
+
+/// The items that are fees that Allowit paid for the request.
+const FEES: [&str; 3] = ["search_fee", "network_fee", "facilitator_fee"];
 
 impl Line {
     /// The item as the receipt names it.
@@ -58,10 +103,15 @@ impl Line {
             "base" => "request".to_owned(),
             item => item.replace('_', " "),
         };
-        match &self.cost {
-            Some(_) if self.item == "inference" => format!("{name} {}", self.credits),
-            Some(cost) => format!("{name} {cost} used"),
-            None => format!("{name} {}", self.credits),
+        match (&self.cost, &self.fee) {
+            (Some(cost), Some(fee)) => format!(
+                "{name} {cost} ({} {} at USD {})",
+                fee.amount, fee.asset, fee.usd_per_asset
+            ),
+            (Some(_), None) if self.item == "inference" => format!("{name} {}", self.credits),
+            (Some(cost), None) if FEES.contains(&self.item.as_str()) => format!("{name} {cost}"),
+            (Some(cost), None) => format!("{name} {cost} used"),
+            (None, _) => format!("{name} {}", self.credits),
         }
     }
 }
@@ -99,6 +149,10 @@ impl Charge {
                         Value::Null => None,
                         cost => Some(amount(cost.as_str()?)?),
                     },
+                    fee: match &line["fee"] {
+                        Value::Null => None,
+                        fee => Some(Fee::of(fee)?),
+                    },
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -118,14 +172,17 @@ impl Charge {
                 if let Some(cost) = &line.cost {
                     item["cost"] = json!(cost);
                 }
+                if let Some(fee) = &line.fee {
+                    item["fee"] = fee.document();
+                }
                 item
             }).collect::<Vec<_>>(),
             "paidBy": "owner",
         })
     }
     /// One text row: the credits, each item and who paid. A call that is
-    /// priced by its tokens shows what it used; `inference` is what the
-    /// request paid for those calls.
+    /// priced by its tokens shows what it used, a fee shows its cost and how
+    /// it was paid, and `inference` is what the request paid for them.
     pub(crate) fn text(&self) -> String {
         let items: Vec<String> = self.lines.iter().map(Line::text).collect();
         let items = if items.len() > 1 {
@@ -277,7 +334,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             charge.text(),
-            "37.0 (request 1.0, decision api 0.24 used, web search 0.912 used, search fee 35.0 used, fetch 0.0, inference 36.0), charged to the policy owner, price list 2026-11-17"
+            "37.0 (request 1.0, decision api 0.24 used, web search 0.912 used, search fee 35.0, fetch 0.0, inference 36.0), charged to the policy owner, price list 2026-11-17"
         );
         assert_eq!(charge.document()["paidBy"], "owner");
         assert_eq!(charge.document()["lines"][1]["item"], "decision_api");
@@ -303,6 +360,27 @@ mod tests {
             first.text(),
             "1.1 (request 1.0, decision api 0.1), charged to the policy owner, price list 2026-11-14"
         );
+        // A network fee that Allowit paid after the decision is a later entry of
+        // the same request: its line shows the fee in its asset and the rate.
+        let settled = Charge::of(&json!({"charged": "2.0", "tariff": "2026-11-17.2", "lines": [
+            {"item": "base", "credits": "1.0"},
+            {"item": "decision_api", "credits": "0.0", "cost": "0.9"},
+            {"item": "inference", "credits": "0.0", "cost": "0.9"},
+            {"item": "network_fee", "credits": "0.0", "cost": "0.156156", "usdNanos": 156156, "fee": {
+                "asset": "XLM", "units": "11154", "amount": "0.0011154", "usdPerAsset": "0.14",
+                "network": "stellar:testnet", "transaction": "ab12",
+            }},
+            {"item": "inference", "credits": "1.0", "cost": "0.156156", "carried": "0.9"},
+        ]}))
+        .unwrap();
+        assert_eq!(
+            settled.text(),
+            "2.0 (request 1.0, decision api 0.9 used, inference 0.0, network fee 0.156156 (0.0011154 XLM at USD 0.14), inference 1.0), charged to the policy owner, price list 2026-11-17.2"
+        );
+        assert_eq!(
+            settled.document()["lines"][3]["fee"],
+            json!({"asset": "XLM", "amount": "0.0011154", "usdPerAsset": "0.14", "transaction": "ab12"})
+        );
         let simple = Charge::of(&json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "1.0"}]})).unwrap();
         assert_eq!(
             simple.text(),
@@ -319,6 +397,9 @@ mod tests {
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "one"}]}),
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "model", "credits": "0.0", "cost": "0.1\u{1b}[31m"}]}),
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "model", "credits": "0.0", "cost": 0.1}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM\u{1b}", "amount": "0.1", "usdPerAsset": "0.14"}}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM", "amount": "0.1", "usdPerAsset": "0.14", "transaction": "a b"}}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM", "amount": "0.1"}}]}),
             json!({"charged": "1.0", "tariff": "v1"}),
             json!(null),
         ] {
