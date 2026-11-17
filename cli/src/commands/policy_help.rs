@@ -376,9 +376,6 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 commands.push(format!("{cli} keys generate {name}"));
             }
             commands.push(format!("{cli} keys use {name}"));
-            if rail.testnet {
-                commands.push(format!("{cli} keys fund {name}"));
-            }
             steps.push(Step {
                 title: if reuse.is_some() {
                     "Use your key"
@@ -396,12 +393,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 None => "Tell the owner the `address` that `keys generate` printed: it is your public key.".to_owned(),
             };
             next = Some(format!(
-                "{public} {}Then wait. When the owner has signed, run: {again}",
-                if rail.testnet {
-                    "`keys fund` creates your account on the test network; it must exist before the owner signs. "
-                } else {
-                    "Your account must exist and hold enough for network fees before the owner signs. "
-                }
+                "{public} Then wait. When the owner has signed, run: {again}"
             ));
         }
         "draft" => {
@@ -497,7 +489,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     let rules = [
         "Pay only when the owner asks, and only that amount. Setting up is not a request, and the commands above are examples: run no payment to test the setup.",
-        "Pay only with `allowit exec`: it pays from the policy wallet. Never pay from your own account; it pays only the network fees.",
+        "Pay only with `allowit exec`: it pays from the policy wallet.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
         "Never print, copy or move a secret key. Never change the policy: only the owner can.",
     ];
