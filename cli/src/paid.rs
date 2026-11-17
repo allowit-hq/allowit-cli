@@ -256,6 +256,11 @@ fn pay(
                 format!(
                     "the payment authorization of request {paid_by} expired before the seller settled it; nothing was paid. Run the command again with a new request ID"
                 )
+            } else if challenge.settled_by == SettledBy::Seller {
+                // The seller did not settle it, or this client holds no proof of its end yet.
+                format!(
+                    "the payment authorization of request {paid_by} is not settled. It moves no funds unless the seller settles it before it expires, and it is never signed again. Run the command with a new request ID for a new payment"
+                )
             } else {
                 format!(
                     "the payment of request {paid_by} is not confirmed; run the command again with --request-id {paid_by}: it resumes this payment and never pays twice"
