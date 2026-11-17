@@ -7,10 +7,11 @@ The `allowit` command provides developer workflows, local key custody, portable 
 Install the command (a release binary when one exists, otherwise a source build; see the [CLI reference](cli/README.md#install)):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh
+curl -fsSL https://app.allowit.ai/install | sh
 ```
 
-An agent starts with the line that its owner copied from the app: `allowit POLICY_ID help`.
+Each Allowit app serves `/install` at its own origin, for the branch of this repository that the deployment links.
+An agent starts with the line that its owner copied from the app: that install URL and `allowit POLICY_ID help`.
 
 Build and test with Rust 1.98 or later:
 

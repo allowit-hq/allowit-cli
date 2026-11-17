@@ -8,7 +8,7 @@ description: Pay within an owner's Allowit policy with the allowit CLI. Use when
 The owner's policy wallet holds the funds. Your key signs requests. The policy decides.
 `allowit POLICY_ID help` prints your next commands with the real values of that policy. Follow it. This file is the map.
 
-1. Install: `curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh`. Check: `allowit --version`.
+1. Install: `curl -fsSL INSTALL_URL | sh`, with the install URL of the owner's line (production: `https://app.allowit.ai/install`). Check: `allowit --version`.
 2. Start: run the owner's line, `allowit POLICY_ID help`. A line that starts with `ALLOWIT_URL=...` names the server; keep it on each command that help prints with it. Without it the server is production.
 3. Key, when help says "awaiting agent key": `allowit rail use <rail>`, `allowit keys generate agent`, `allowit keys use agent`. Give the owner the printed `address`. Wait until the owner has signed. Run help again.
 4. Trust: help prints the server key. The owner sees the same key in the app under Agent access. Run `allowit rail trust ORIGIN KEY` with that key only.
