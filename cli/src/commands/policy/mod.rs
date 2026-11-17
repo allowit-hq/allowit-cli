@@ -7,6 +7,7 @@ mod owner;
 mod params;
 mod show;
 use crate::{ctx::Ctx, error::Result};
+pub(crate) use check::EXAMPLES as CHECK_EXAMPLES;
 use clap::Subcommand;
 pub(crate) use generate::EXAMPLES as GENERATE_EXAMPLES;
 pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy kinds\n  allowit policy check policy.rs\n  allowit policy check policy.rs --compile\n  allowit policy show --source";

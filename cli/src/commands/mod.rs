@@ -280,7 +280,7 @@ pub(crate) fn command() -> clap::Command {
             (Some(examples), false) => examples_template(examples),
             (None, _) => TEMPLATE.to_owned(),
         };
-        let cmd = if kinds {
+        let cmd = if kinds || examples.as_deref() == Some(policy::CHECK_EXAMPLES) {
             cmd.mut_arg("kind", |kind| kind.help(crate::kinds::flag_help()))
         } else {
             cmd

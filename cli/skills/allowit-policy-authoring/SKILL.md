@@ -28,7 +28,7 @@ The host and rail supply authenticated request facts, accounting and enrichment.
 Caller-provided claims cannot replace trusted state, native authority or verified settlement.
 
 Run `allowit policy check POLICY.rs` to inspect the exact source digest, leading canonical rules and state-write shape.
-This command validates source structure. Add `--compile` to also type-check through the pinned Core helper and portable Std library.
+This command validates source structure with the profile of the place that evaluates the policy. A policy that calls a server function, and every policy of a keypair wallet (`--kind native`), is evaluated by the server: the check uses the server profile, which admits the server functions and the text of an owner param read with `as_str()`, and it names the server functions that the policy calls. Every other policy is compiled by a wallet contract and is checked with the portable profile. `--kind custom` refuses a policy that calls a server function. Add `--compile` to also type-check through the pinned Core helper and portable Std library.
 `--compile` requires rustc. Missing tools, compilation failures and runtime limits stop the check.
 `cargo test --locked -p allowit-policy-template` also type-checks the template as ordinary Rust.
 A local build does not authorize publication, signing or spending.
