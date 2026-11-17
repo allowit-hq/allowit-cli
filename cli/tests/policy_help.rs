@@ -394,7 +394,7 @@ fn the_help_shows_the_credits_that_each_request_costs_the_owner() {
             "{text}"
         );
         assert!(
-            text.contains("Credits: Allowit charges the policy owner 1.5 credits for each request that it evaluates, also for a denied one. You need no credits of your own.\n"),
+            text.contains("Credits: each request that you sign costs the policy owner 1.5 credits, whatever its outcome, and the model tokens that it uses, in whole credits. You need no credits of your own.\n"),
             "{text}"
         );
         assert!(!text.contains("credits_exhausted"), "{text}");
