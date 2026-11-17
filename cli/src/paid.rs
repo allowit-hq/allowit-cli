@@ -282,6 +282,11 @@ fn settlement(cx: &mut Ctx, id: &str, wait: Duration) -> Result<(Value, Vec<Paym
     let wallet = cx.wallet(rail)?;
     let binding = adapter.status_binding(cx, wallet.as_deref(), id)?;
     let (outcome, payment) = adapter.status_outcome(cx, id, binding, wait, None)?;
+    // The journal keeps the end of the request as this read found it, as `status` does: a
+    // payment that settled is no longer recorded as submitted.
+    let code = exit::execution_status(outcome.status.clone()).code();
+    let dir = cx.dir()?;
+    exec::finish(cx, &dir, id, code);
     Ok((outcome.document, payment))
 }
 
