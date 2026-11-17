@@ -16,16 +16,24 @@ cargo build --locked --release --bin allowit
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh
+curl -fsSL https://app.allowit.ai/install | sh
 ```
 
-[`install.sh`](../install.sh) installs `allowit` to `~/.local/bin` and prints the version with the build revision.
-It takes a release binary when the GitHub release has one for the system, and checks its SHA-256 against the
-release's `SHA256SUMS` file before it installs anything. Otherwise it says so and builds from source with cargo at
-one exact commit. It installs Rust with rustup when cargo is missing, and as root on a system with `apt-get` the
+The install URL is `<app origin>/install`. Each Allowit app links one branch of this repository and serves a short
+script there: it sets `ALLOWIT_CLI_REF` to that branch, downloads the branch's [`install.sh`](../install.sh) from
+`raw.githubusercontent.com` and runs it. The production app links `main`, the release branch. Another deployment
+names its own origin, and the owner's line for the agent carries that URL. `install.sh` also runs on its own.
+
+`install.sh` installs `allowit` to `~/.local/bin` and prints the version with the build revision.
+On the release branch it takes a release binary when the GitHub release has one for the system, and checks its
+SHA-256 against the release's `SHA256SUMS` file before it installs anything. Otherwise it says so and builds from
+source with cargo at one exact commit: another branch has no release binary, so it is always built.
+It installs Rust with rustup when cargo is missing, and as root on a system with `apt-get` the
 missing build tools. A root shell without `~/.local/bin` on `PATH` gets a link in `/usr/local/bin`.
-`ALLOWIT_INSTALL_DIR`, `ALLOWIT_VERSION`, `ALLOWIT_REF`, `ALLOWIT_FROM_SOURCE=1`, `ALLOWIT_NO_DEPS=1`,
-`ALLOWIT_RELEASE_URL` and `ALLOWIT_DRY_RUN=1` change that; the script's header describes each one.
+`ALLOWIT_CLI_REF` names the branch, tag or commit: letters, digits, `.`, `_` and `-` only, and the script refuses
+any other value before it does anything. `ALLOWIT_INSTALL_DIR`, `ALLOWIT_VERSION`, `ALLOWIT_FROM_SOURCE=1`,
+`ALLOWIT_NO_DEPS=1`, `ALLOWIT_RELEASE_URL` and `ALLOWIT_DRY_RUN=1` change the rest; the script's header describes
+each one.
 A release serves the installer with `allowit-<target>.tar.gz` for `x86_64-unknown-linux-gnu`,
 `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and `aarch64-apple-darwin`, each holding the `allowit` binary,
 and one `SHA256SUMS` file.

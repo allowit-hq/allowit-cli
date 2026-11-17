@@ -47,7 +47,8 @@ mod tests {
         assert!(guide.starts_with("# Pay within an Allowit policy"));
         assert!(guide.split_whitespace().count() <= 450, "the skill grew");
         for part in [
-            "install.sh",
+            "curl -fsSL INSTALL_URL | sh",
+            "https://app.allowit.ai/install",
             "allowit POLICY_ID help",
             "allowit rail use example:testnet",
             "allowit keys generate agent",

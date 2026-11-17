@@ -1,21 +1,27 @@
 #!/bin/sh
 # Installs the allowit command.
 #
-#   curl -fsSL https://raw.githubusercontent.com/allowit-hq/allowit-cli/main/install.sh | sh
+#   curl -fsSL https://app.allowit.ai/install | sh
+#
+# An Allowit app serves a short script at <app origin>/install. It names the branch of this
+# repository that the deployment links, as ALLOWIT_CLI_REF, and runs this file from that
+# branch. This file also runs on its own: sh install.sh.
 #
 # 1. It installs a prebuilt binary from this repository's GitHub release when the release has
 #    one for this system, and checks its SHA-256 against the release's SHA256SUMS file.
+#    Releases are cut from the release branch, main. Another branch has no release binary.
 # 2. Otherwise it builds from source with cargo, at one exact commit, and says so. It installs
 #    Rust with rustup when cargo is missing. As root on a system with apt-get it also installs
 #    the missing build tools (git, a C compiler, CA certificates).
 # It installs to ~/.local/bin and prints the version with the build revision.
 #
 # Settings (environment):
+#   ALLOWIT_CLI_REF      the branch, tag or commit to install (default: main, the release
+#                        branch). Letters, digits, '.', '_' and '-' only, at most 64 characters.
 #   ALLOWIT_INSTALL_DIR  the directory of the binary (default: $HOME/.local/bin)
-#   ALLOWIT_VERSION      a release tag such as v0.5.0 (default: the latest release)
+#   ALLOWIT_VERSION      a release tag of the release branch, such as v0.5.0 (default: the
+#                        latest release)
 #   ALLOWIT_RELEASE_URL  the base URL of the release files, for a mirror (default: GitHub)
-#   ALLOWIT_REF          the branch, tag or commit of a source build (default: ALLOWIT_VERSION,
-#                        or main without it)
 #   ALLOWIT_FROM_SOURCE  1 builds from source even when a release binary exists
 #   ALLOWIT_NO_DEPS      1 installs no build tool and no Rust; the script names what is missing
 #   ALLOWIT_DRY_RUN      1 prints the plan and changes nothing
@@ -24,14 +30,36 @@ set -eu
 
 REPO=allowit-hq/allowit-cli
 SOURCE=https://github.com/$REPO
+RELEASE_BRANCH=main
 DIR=${ALLOWIT_INSTALL_DIR:-${HOME:?HOME is not set}/.local/bin}
-# A source build of a requested release builds that release, never another revision.
-REF=${ALLOWIT_REF:-${ALLOWIT_VERSION:-main}}
 DRY=${ALLOWIT_DRY_RUN:-0}
 
 say() { printf 'allowit install: %s\n' "$*" >&2; }
 die() { printf 'allowit install: error: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# A ref goes into URLs and git arguments. Only a plain name passes: it starts with a letter or
+# a digit and holds letters, digits, '.', '_' and '-'. The byte locale keeps the ranges ASCII.
+valid_ref() (
+  LC_ALL=C
+  case $1 in
+    "" | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]* | *..*) exit 1 ;;
+  esac
+  [ ${#1} -le 64 ]
+)
+
+[ -z "${ALLOWIT_REF:-}" ] || die "ALLOWIT_REF is now ALLOWIT_CLI_REF. Nothing was installed."
+REF=${ALLOWIT_CLI_REF:-$RELEASE_BRANCH}
+valid_ref "$REF" ||
+  die "ALLOWIT_CLI_REF must be a branch, tag or commit name of letters, digits, '.', '_' and '-', at most 64 characters. Nothing was installed."
+VERSION=${ALLOWIT_VERSION:-}
+if [ -n "$VERSION" ]; then
+  valid_ref "$VERSION" || die "ALLOWIT_VERSION must be a release tag such as v0.5.0. Nothing was installed."
+  [ "$REF" = "$RELEASE_BRANCH" ] || [ "$REF" = "$VERSION" ] ||
+    die "ALLOWIT_VERSION names a release of $RELEASE_BRANCH, and ALLOWIT_CLI_REF names $REF. Set one of them."
+  # A source build of a requested release builds that release, never another revision.
+  REF=$VERSION
+fi
 
 # The release target of this system, or nothing when no release serves it.
 target() {
@@ -94,11 +122,16 @@ install_binary() { # install_binary FILE
 # 1. A release binary, when one exists for this system.
 from_release() {
   [ "${ALLOWIT_FROM_SOURCE:-0}" != 1 ] || return 1
+  # A release is a revision of the release branch. A mirror serves what its owner put there.
+  if [ "$REF" != "$RELEASE_BRANCH" ] && [ -z "$VERSION" ] && [ -z "${ALLOWIT_RELEASE_URL:-}" ]; then
+    say "$REF is not the release branch ($RELEASE_BRANCH), so it has no release binary"
+    return 1
+  fi
   triple=$(target)
   [ -n "$triple" ] || { say "no release binary is built for $(uname -s) $(uname -m)"; return 1; }
   have curl || have wget || return 1
   if [ -n "${ALLOWIT_RELEASE_URL:-}" ]; then base=$ALLOWIT_RELEASE_URL
-  elif [ -n "${ALLOWIT_VERSION:-}" ]; then base=$SOURCE/releases/download/$ALLOWIT_VERSION
+  elif [ -n "$VERSION" ]; then base=$SOURCE/releases/download/$VERSION
   else base=$SOURCE/releases/latest/download; fi
   asset=allowit-$triple.tar.gz
   fetch "$base/SHA256SUMS" "$TMP/SHA256SUMS" 2>/dev/null || { say "the release has no binaries"; return 1; }
@@ -136,7 +169,7 @@ build_tools() {
 
 # 2. A source build at one exact commit.
 from_source() {
-  say "no release binary is available; building from source at $SOURCE ($REF). This takes a few minutes."
+  say "building from source at $SOURCE ($REF). This takes a few minutes."
   build_tools
   if ! have cargo && [ -x "$HOME/.cargo/bin/cargo" ]; then PATH=$HOME/.cargo/bin:$PATH; fi
   if ! have cargo; then
