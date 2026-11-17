@@ -61,6 +61,19 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             error
         })?
     };
+    // The kinds take what the server binds to them. A keypair wallet takes any policy: the
+    // server evaluates all of it. A Simple or Standard wallet takes the canonical rules, or a
+    // policy that calls a server function, which the server evaluates before it co-signs:
+    // other custom code needs a contract that runs it, the Custom wallet.
+    if let Some(kind @ (WalletKind::Simple | WalletKind::Standard)) = args.kind
+        && functions.is_empty()
+        && !shape.canonical_only
+    {
+        return Err(Error::usage(format!(
+            "The {} wallet takes the canonical rules, or a policy that calls a server function, and this policy has other custom code. Choose the Native wallet, where the server evaluates the whole policy, or the Custom wallet, whose contract runs it.",
+            kind.id()
+        )));
+    }
     if args.compile {
         let tools = allowit_sdk::authoring::HostTools::default();
         if server_profile {
