@@ -51,7 +51,7 @@ Use `wallet show` and `policy show --source` to inspect the binding. `walletKind
 Run `allowit policy kinds` for the four wallet kinds of the rail: `native`, `simple`, `standard` and `custom`. It marks the recommended kind and states for each kind the sellers that it pays and its network fee.
 Recommend `native`: the agent's own wallet pays every x402 seller, and the seller's facilitator pays the network fee. `simple`, `standard` and `custom` are contract wallets. They pay only sellers that accept a settled payment as proof, and each payment costs more in network fee. Choose `standard` or `custom` when the owner asks for rules that the chain enforces.
 Pass the owner's choice to `policy generate --kind KIND`. Do not choose a kind for the owner.
-For `native`, the owner first creates the agent's wallet account with `wallet setup`, then drafts with `policy generate --kind native --installation ID`.
+For `native`, the owner first creates and funds the agent's wallet account with `wallet setup --amount AMOUNT`, then drafts with `policy generate --kind native --installation ID`.
 Use `exec` for the exact operation and retain its `--request-id`.
 After an uncertain result, read `status` or repeat the same intent with the same ID. Do not create replacement bytes or a new spending request to resolve uncertainty.
 A failed enclosing transaction does not prove that its retained authorization cannot execute elsewhere.

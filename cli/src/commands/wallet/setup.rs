@@ -1,10 +1,11 @@
 //! Terminal binding for the setup of one agent's wallet account.
 use crate::{ctx::Ctx, error::Result, owner};
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL wallet setup --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --request-id setup-0001 --yes";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL wallet setup --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --request-id setup-0001 --amount 20 --yes";
 /// Create the agent's own wallet account with one owner-signed transaction and register it with the server
 ///
 /// The wallet is a new account, not the owner's account. The owner can do everything alone;
-/// the agent and the server pay only together. The server registers the wallet from the
+/// the agent and the server pay only together. With `--amount`, the same transaction funds the
+/// wallet for the agent's payments: the owner's account pays the amount and every reserve. The server registers the wallet from the
 /// ledger and replies with its installation ID for `policy generate --installation`.
 #[derive(clap::Args, Debug)]
 pub(crate) struct Args {
@@ -23,6 +24,11 @@ pub(crate) struct Args {
     /// Fee per operation in the selected rail's base units
     #[arg(long, default_value = "100")]
     pub fee_per_operation: String,
+    /// The amount that the setup moves into the wallet for the agent's payments, in the installed
+    /// asset (decimal). The owner's account pays it in the setup transaction, so no funding step
+    /// follows. Without it the wallet holds its reserve and a fee float.
+    #[arg(long)]
+    pub amount: Option<String>,
 }
 pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let local = owner::load(cx, &a.owner_key)?;
@@ -36,6 +42,7 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
             server: &a.server,
             request_id: &a.request_id,
             fee_per_operation: &a.fee_per_operation,
+            amount: a.amount.as_deref(),
         },
     )?);
     Ok(0)

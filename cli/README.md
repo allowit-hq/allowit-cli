@@ -99,7 +99,7 @@ allowit keys ls | show NAME | fund NAME | export NAME | rm NAME
 allowit config show | path
 allowit wallet ls | show | use ADDR [--profile VERSION]
 allowit wallet import PROFILE_FILE | --policy POLICY_ID
-allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID
+allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-id ID [--amount AMOUNT]
 allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
@@ -206,7 +206,7 @@ A contract wallet (`simple`, `standard`, `custom`) pays only sellers that accept
 | `custom` | A contract built from the policy source enforces all of it on chain | As `simple` | As `simple` |
 
 `allowit policy kinds` prints each kind of the selected rail with its explanation, the sellers that it pays (`pays`), its network fee (`fee`), enforcement and custody, and for `standard` its supported params and their link. The recommended kind has the row `recommended  yes`. `policy generate --help` prints the same text.
-The owner of a `native` wallet first creates the agent's wallet account with `allowit wallet setup`, then drafts with `policy generate --kind native --installation ID`.
+The owner of a `native` wallet first creates and funds the agent's wallet account with `allowit wallet setup --amount AMOUNT`: one owner transaction, from the owner's own account. The owner then drafts with `policy generate --kind native --installation ID` and approves it with `policy activate`. A Native deployment takes two owner signatures: the setup transaction and the approval.
 `allowit policy kinds --server` reads `GET /api/wallet-kinds` and prints the kinds that the `ALLOWIT_URL` server accepts on the rail. `--json` prints the list as an array.
 Kind ids are exact. A kind that the rail does not support exits 3 before any key or network access.
 The CLI selects the rail's wallet profile for the kind. A rail can install `simple` and `standard` through one profile.

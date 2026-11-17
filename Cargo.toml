@@ -11,7 +11,7 @@ repository = "https://github.com/allowit-hq/allowit-cli"
 # SDK registers every vendor plugin and pins one core release, so the CLI
 # never names a vendor crate and Cargo builds one copy of core.
 [workspace.dependencies]
-allowit-sdk = { git = "https://github.com/allowit-hq/allowit-sdk.git", rev = "a65c2f10112f80453595ab2aea004dc57ca16d7f" }
+allowit-sdk = { git = "https://github.com/allowit-hq/allowit-sdk.git", rev = "4d6f8391c9b375b0e32a947fc110f100f9c57a8e" }
 
 # Every Allowit workspace uses this profile block, so a shared target directory
 # builds each shared crate once. Release builds keep overflow checks, which the
