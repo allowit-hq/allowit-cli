@@ -103,7 +103,7 @@ allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-i
 allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
-allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile]
+allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile] [--onchain]
 allowit policy build POLICY_ID (--ticket TICKET --server-key PUBLIC_KEY | --owner-key NAME --origin ORIGIN) [--out WASM]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
@@ -203,7 +203,7 @@ A contract wallet (`simple`, `standard`, `custom`) pays only sellers that accept
 | `native` (recommended) | The agent's own wallet. Allowit checks each payment against the policy before it co-signs | Every x402 seller | The lowest: none when the seller's facilitator settles the payment |
 | `simple` | A contract wallet holds the funds. Allowit checks each payment, as for `native` | Fewer sellers: only those that accept a settled payment as proof | Higher: each payment runs the wallet contract on chain |
 | `standard` | A contract wallet enforces the standard rules on chain, for the [supported params](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters) | As `simple` | As `simple` |
-| `custom` | A contract built from the policy source enforces all of it on chain | As `simple` | As `simple` |
+| `custom` | A contract from the policy source enforces each step that the chain can check. Allowit checks the rest before it co-signs | As `simple` | As `simple` |
 
 `allowit policy kinds` prints each kind of the selected rail with its explanation, the sellers that it pays (`pays`), its network fee (`fee`), enforcement and custody, and for `standard` its supported params and their link. The recommended kind has the row `recommended  yes`. `policy generate --help` prints the same text.
 The owner of a `native` wallet first creates and funds the agent's wallet account with `allowit wallet setup --amount AMOUNT`: one owner transaction, from the owner's own account. The owner then drafts with `policy generate --kind native --installation ID` and approves it with `policy activate`. A Native deployment takes two owner signatures: the setup transaction and the approval.
