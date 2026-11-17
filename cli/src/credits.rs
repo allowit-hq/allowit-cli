@@ -367,19 +367,19 @@ mod tests {
             {"item": "decision_api", "credits": "0.0", "cost": "0.9"},
             {"item": "inference", "credits": "0.0", "cost": "0.9"},
             {"item": "network_fee", "credits": "0.0", "cost": "0.156156", "usdNanos": 156156, "fee": {
-                "asset": "XLM", "units": "11154", "amount": "0.0011154", "usdPerAsset": "0.14",
-                "network": "stellar:testnet", "transaction": "ab12",
+                "asset": "XYZ", "units": "11154", "amount": "0.0011154", "usdPerAsset": "0.14",
+                "network": "net:test", "transaction": "ab12",
             }},
             {"item": "inference", "credits": "1.0", "cost": "0.156156", "carried": "0.9"},
         ]}))
         .unwrap();
         assert_eq!(
             settled.text(),
-            "2.0 (request 1.0, decision api 0.9 used, inference 0.0, network fee 0.156156 (0.0011154 XLM at USD 0.14), inference 1.0), charged to the policy owner, price list 2026-11-17.2"
+            "2.0 (request 1.0, decision api 0.9 used, inference 0.0, network fee 0.156156 (0.0011154 XYZ at USD 0.14), inference 1.0), charged to the policy owner, price list 2026-11-17.2"
         );
         assert_eq!(
             settled.document()["lines"][3]["fee"],
-            json!({"asset": "XLM", "amount": "0.0011154", "usdPerAsset": "0.14", "transaction": "ab12"})
+            json!({"asset": "XYZ", "amount": "0.0011154", "usdPerAsset": "0.14", "transaction": "ab12"})
         );
         let simple = Charge::of(&json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "1.0"}]})).unwrap();
         assert_eq!(
@@ -397,9 +397,9 @@ mod tests {
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "base", "credits": "one"}]}),
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "model", "credits": "0.0", "cost": "0.1\u{1b}[31m"}]}),
             json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "model", "credits": "0.0", "cost": 0.1}]}),
-            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM\u{1b}", "amount": "0.1", "usdPerAsset": "0.14"}}]}),
-            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM", "amount": "0.1", "usdPerAsset": "0.14", "transaction": "a b"}}]}),
-            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XLM", "amount": "0.1"}}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XYZ\u{1b}", "amount": "0.1", "usdPerAsset": "0.14"}}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XYZ", "amount": "0.1", "usdPerAsset": "0.14", "transaction": "a b"}}]}),
+            json!({"charged": "1.0", "tariff": "v1", "lines": [{"item": "network_fee", "credits": "0.0", "cost": "0.1", "fee": {"asset": "XYZ", "amount": "0.1"}}]}),
             json!({"charged": "1.0", "tariff": "v1"}),
             json!(null),
         ] {
