@@ -160,7 +160,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     if args.onchain {
         let part = onchain.expect("the Custom kind derives the on-chain part");
-        cx.out.stdout.push_str(&part.source);
+        // With `--json` the part is the `source` field of one JSON object.
+        cx.out.source(&part.source);
         return Ok(0);
     }
     // The server evaluates a policy that the contract of its wallet does not run in full.

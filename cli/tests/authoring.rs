@@ -156,6 +156,9 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         assert_eq!(code(&output), Some(0), "{}", stderr(&output));
         assert_eq!(String::from_utf8_lossy(&output.stdout), part, "{args:?}");
     }
+    // With `--json`, stdout stays one JSON document: the part is its `source` field.
+    let printed = sandbox.json(&["policy", "check", "asks.rs", "--onchain"]);
+    assert_eq!(printed, serde_json::json!({"source": part}));
     let checked = sandbox.json(&["policy", "check", "asks.rs", "--kind", "custom"]);
     assert_eq!(
         checked["onchain"]["sourceHash"],
