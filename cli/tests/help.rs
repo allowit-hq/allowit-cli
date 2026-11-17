@@ -92,6 +92,7 @@ fn offline_help_examples_run_and_print_only_data() {
         "allowit history",
         "allowit history --limit 5 --json",
         "allowit policy check policy.rs",
+        "allowit policy check policy.rs --kind native",
         "allowit policy kinds",
         "allowit policy kinds --json",
         "allowit keys rm old-agent --yes",

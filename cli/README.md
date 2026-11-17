@@ -103,7 +103,7 @@ allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-i
 allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
-allowit policy check POLICY.rs [--compile]
+allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile]
 allowit policy build POLICY_ID (--ticket TICKET --server-key PUBLIC_KEY | --owner-key NAME --origin ORIGIN) [--out WASM]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
