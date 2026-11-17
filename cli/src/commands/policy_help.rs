@@ -290,7 +290,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             ""
         };
         format!(
-            "Credits: Allowit charges the policy owner {evaluation} credits for each request that it evaluates, also for a denied one. You need no credits of your own.{unpaid}"
+            "Credits: each request that you sign costs the policy owner {evaluation} credits, whatever its outcome, and the model tokens that it uses, in whole credits. You need no credits of your own.{unpaid}"
         )
     });
     // The local key of this policy's agent, if this device holds it.
