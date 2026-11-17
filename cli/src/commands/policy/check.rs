@@ -26,57 +26,15 @@ pub(crate) struct Args {
     #[arg(long)]
     pub compile: bool,
 }
-/// Whether the text of `source` names a server function of Core as `allowit::<function>`, or
-/// in a `use allowit::{..}` list. It reads the raw text, comments included, so it can say yes
-/// for a source that calls none. It is used only for a source that the server profile
-/// refuses, where the profile itself names no function: there a doubt refuses the policy.
-fn may_call_server_function(source: &str) -> bool {
-    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
-    allowit_sdk::authoring::SERVER_FUNCTIONS
-        .iter()
-        .any(|(namespace, name)| {
-            source.match_indices(name).any(|(at, _)| {
-                let (before, after) = (&source[..at], &source[at + name.len()..]);
-                if before.chars().next_back().is_some_and(word)
-                    || after.chars().next().is_some_and(word)
-                {
-                    return false;
-                }
-                let path = before.trim_end();
-                // `allowit::name`, or `name` in the braces of `allowit::{ .. }`.
-                let direct = path
-                    .strip_suffix("::")
-                    .is_some_and(|path| path.trim_end().ends_with(namespace));
-                let listed = path.rfind('{').is_some_and(|open| {
-                    !path[open..].contains('}')
-                        && path[..open]
-                            .trim_end()
-                            .strip_suffix("::")
-                            .is_some_and(|path| path.trim_end().ends_with(namespace))
-                });
-                direct || listed
-            })
-        })
-}
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let source = super::read(&args.file)?;
-    let server = allowit_sdk::authoring::check_server(&source);
+    // The server's gate checks every policy with the server profile, whatever wallet holds
+    // it. So that profile comes first: a policy that it refuses reaches no wallet. Its result
+    // names the server functions that the source calls, as Core's gate reads them. No
+    // contract can run one: the server evaluates such a policy before it co-signs.
+    let server = allowit_sdk::authoring::check_server(&source)?;
     let portable = allowit_sdk::authoring::check(&source);
-    // The server functions that the source calls. No contract can run one: the server
-    // evaluates such a policy before it co-signs.
-    let functions = match &server {
-        Ok(checked) => checked.functions.clone(),
-        // The server profile refuses the source, so it names no function for it. A source
-        // that may call a server function is then no contract's policy either: it ends here,
-        // with the server profile's reason, and never passes as source for a contract.
-        Err(refused) if may_call_server_function(&source) => {
-            return Err(Error::usage(format!(
-                "{}. This policy names a server function, which only the server can run, and the server profile refuses the policy",
-                refused.message
-            )));
-        }
-        Err(_) => Vec::new(),
-    };
+    let functions = server.functions;
     let server_profile = match args.kind {
         Some(WalletKind::Custom) if !functions.is_empty() => {
             return Err(Error::usage(format!(
@@ -86,21 +44,20 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
         // The server enforces the whole policy of a keypair wallet.
         Some(WalletKind::Native) => true,
-        // A contract wallet holds its source: the rail checks it with the portable profile.
+        // A contract wallet holds its source: its rail also checks it with the portable
+        // profile.
         Some(_) => false,
-        // No kind: a policy that only the server profile admits is a keypair wallet's policy.
-        None => portable.is_err() && server.is_ok(),
+        // No kind: a policy that the portable profile refuses is a keypair wallet's policy.
+        None => portable.is_err(),
     };
     let shape = if server_profile {
-        server?.shape
+        server.shape
     } else {
         portable.map_err(|mut error| {
             // The server profile admits the source: say which wallet holds such a policy.
-            if server.is_ok() {
-                error.message.push_str(
-                    ". Only a keypair wallet's policy may use it (--kind native): the server keeps that wallet's params. A contract wallet's policy states its text in the source",
-                );
-            }
+            error.message.push_str(
+                ". Only a keypair wallet's policy may use it (--kind native): the server keeps that wallet's params. A contract wallet's policy states its text in the source",
+            );
             error
         })?
     };
