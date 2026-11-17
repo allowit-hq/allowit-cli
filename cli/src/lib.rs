@@ -373,7 +373,7 @@ mod display_tests {
         assert_eq!(
             out.stderr,
             "error: credits_exhausted: Allowit did not evaluate this request: the owner of the policy has no credits left\n\
-             cause: Allowit charges the policy owner credits for each evaluation, and the owner's balance does not cover one. Nothing was signed or sent, and no credits were charged.\n\
+             cause: Allowit charges the policy owner one credit for each request, whatever its outcome, and the owner has less than one. Nothing was signed or sent, and no credits were charged.\n\
              fix: Tell the owner to get credits from Allowit; the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.\n"
         );
         let mut out = crate::term::Out::new(true, true, false, true);
