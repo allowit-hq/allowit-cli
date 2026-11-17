@@ -241,18 +241,20 @@ pub(crate) fn explained(code: &str) -> Option<Explained> {
     })
 }
 
-/// The server code of a denial by the server's policy runner. Allowit charges it.
-pub(crate) const RUNNER_DENIED: &str = "server_policy_denied";
-
-/// True for a denial that Allowit charged: a policy denial, a denial of the
-/// server's policy runner, or a metered call that the credits or the
-/// allowance did not cover.
+/// True for a refusal of a request that Allowit may have charged. The owner
+/// pays for each request that Allowit evaluates, whatever its outcome: a
+/// denial of the policy, of the server's policy runner or of a decision
+/// question, a request that waits for its owner, a metered call that the
+/// credits or the allowance did not cover, and a step that failed. The
+/// refusals before the evaluation, and a ledger that did not answer,
+/// charged nothing. The charge is then read from the server, which answers
+/// only when it holds one.
 pub(crate) fn charged_denial(error: &Error) -> bool {
     error.code == crate::exit::Exit::Denied.code()
-        || matches!(
-            error.api_code.as_deref(),
-            Some(INSUFFICIENT | ALLOWANCE | RUNNER_DENIED)
-        )
+        || error
+            .api_code
+            .as_deref()
+            .is_some_and(|code| !matches!(code, EXHAUSTED | RUNNING | UNAVAILABLE))
 }
 
 #[cfg(test)]
@@ -353,16 +355,20 @@ mod tests {
         let mut policy = Error::api(409, "The policy denied this operation");
         policy.code = 20;
         assert!(charged_denial(&policy));
-        // The server's policy runner denies with its own code and status.
-        for (status, code) in [(403, RUNNER_DENIED), (409, INSUFFICIENT), (409, ALLOWANCE)] {
-            assert!(charged_denial(&Error::refused(status, code, "x")), "{code}");
-        }
-        // A refusal before the evaluation charged nothing.
+        // The server's policy runner and a decision question deny with their own codes. A
+        // request that waits for its owner, and one whose step failed, were evaluated too.
         for (status, code) in [
-            (402, EXHAUSTED),
-            (409, RUNNER_DENIED.trim_end_matches('d')),
+            (403, "server_policy_denied"),
+            (403, "decision_denied"),
+            (409, INSUFFICIENT),
+            (409, ALLOWANCE),
+            (409, "owner_review_pending"),
             (409, "wallet_rejected"),
         ] {
+            assert!(charged_denial(&Error::refused(status, code, "x")), "{code}");
+        }
+        // A refusal before the evaluation, and a ledger that did not answer, charged nothing.
+        for (status, code) in [(402, EXHAUSTED), (409, RUNNING), (503, UNAVAILABLE)] {
             assert!(
                 !charged_denial(&Error::refused(status, code, "x")),
                 "{code}"

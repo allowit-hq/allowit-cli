@@ -339,7 +339,7 @@ The owner of a policy pays for compute, whatever the outcome. Each request that 
 
 - `allowit POLICY_ID help` prints what one request costs the owner, and says when the owner has no credits left.
 - The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each item and the price list version. A call that is priced by its tokens shows what it used (`decision api 0.24 used`), and `inference` is the whole credits that the request paid for those calls. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `GET /api/agent/charge` of the policy's server; a server that does not answer leaves the receipt without the row.
-- A policy denial (exit 20) prints the same `credits:` line on stderr, and `error.credits` in JSON. A denied request ID keeps its decision: use a new request ID to ask again.
+- A request that Allowit refused after it evaluated it prints the same `credits:` line on stderr, and `error.credits` in JSON: a policy denial (exit 20), a denial of a decision question, a request that waits for its owner, or a failed step. The owner paid for it. A denied request ID keeps its decision: use a new request ID to ask again.
 - A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON.
 
 | Code | Exit | Meaning | What to do |
