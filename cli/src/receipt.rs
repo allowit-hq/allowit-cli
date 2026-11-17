@@ -192,7 +192,7 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<LimitReport>) {
     if let Some(charged) = &charged {
         rows.push((FEE_CHARGED.into(), charged.text.clone()));
     }
-    // What the evaluation cost the policy owner in credits.
+    // What the request cost the policy owner in credits.
     let credits = map
         .get(crate::credits::KEY)
         .and_then(crate::credits::Charge::of);
@@ -304,20 +304,20 @@ mod tests {
         );
     }
 
-    /// The receipt shows what the evaluation cost the policy owner in credits, on one row
+    /// The receipt shows what the request cost the policy owner in credits, on one row
     /// after the fee. JSON keeps the charge as an object.
     #[test]
     fn a_receipt_shows_the_credits_of_its_evaluation() {
         let charge = json!({
-            "charged": "1.1", "tariff": "2026-11-14", "paidBy": "owner",
-            "lines": [{"item": "base", "credits": "1.0"}, {"item": "decision_api", "credits": "0.1"}],
+            "charged": "2.0", "tariff": "2026-11-17", "paidBy": "owner",
+            "lines": [{"item": "base", "credits": "1.0"}, {"item": "decision_api", "credits": "0.0", "cost": "1.23"}, {"item": "inference", "credits": "1.0", "cost": "1.23"}],
         });
         let mut document = settled();
         document["credits"] = charge.clone();
         let shown = text(document.clone());
         assert!(
             shown.contains(
-                "feeCharged       0.0123456 XYZ\ncredits          1.1 (base 1.0, decision api 0.1), charged to the policy owner, price list 2026-11-14\n"
+                "feeCharged       0.0123456 XYZ\ncredits          2.0 (request 1.0, decision api 1.23 used, inference 1.0), charged to the policy owner, price list 2026-11-17\n"
             ),
             "{shown}"
         );

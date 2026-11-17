@@ -35,7 +35,7 @@ A local build does not authorize publication, signing or spending.
 
 The shared source gate admits only the portable vocabulary. Keep file access, environment access, unsafe code, foreign dependencies, floating-point values and pointer-width behavior out of authored source.
 Custom state uses the admitted `get_state` and `set_state` interfaces. Simple and Standard wallets reject bespoke state writes.
-Classic custody requires canonical-only source. The native installation binds the complete source, typed params and selected policy tier.
+Classic custody runs canonical-only source in full. It takes any other source, such as one that calls a server function, only with the server's evaluation of each operation, and it rejects bespoke state writes. The native installation binds the complete source, typed params and selected policy tier.
 
 ## Requests through the selected adapter
 
