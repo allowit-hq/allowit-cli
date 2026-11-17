@@ -168,6 +168,33 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     assert_eq!(portable["profile"], "portable");
     assert_eq!(portable["placement"], "contract");
     assert_eq!(portable["serverFunctions"], serde_json::json!([]));
+    // The server profile takes at most 16000 bytes. A larger policy that names a server
+    // function is refused for every kind: it never passes as source for a contract.
+    let padding = format!("// {}\n", "padding ".repeat(2_100));
+    std::fs::write(
+        sandbox.work().join("large.rs"),
+        format!("{padding}{states}"),
+    )
+    .unwrap();
+    for args in [
+        &["policy", "check", "large.rs"][..],
+        &["policy", "check", "large.rs", "--kind", "custom"],
+        &["policy", "check", "large.rs", "--kind", "standard"],
+        &["policy", "check", "large.rs", "--kind", "native"],
+    ] {
+        refused(args, &["16000 bytes"]);
+    }
+    // A large policy that names none is a contract's policy, as before.
+    std::fs::write(
+        sandbox.work().join("plain.rs"),
+        format!(
+            "{padding}{}",
+            include_str!("../templates/policy/src/policy.rs")
+        ),
+    )
+    .unwrap();
+    let plain = sandbox.json(&["policy", "check", "plain.rs", "--kind", "custom"]);
+    assert_eq!(plain["placement"], "contract");
     // A type error fails the compilation of a server policy too.
     std::fs::write(
         sandbox.work().join("wrong.rs"),
