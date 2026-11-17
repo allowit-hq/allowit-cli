@@ -163,6 +163,36 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     ]);
     assert_eq!(native["compiled"], true);
 
+    // Custom code without a server function: the Native wallet takes it, as its draft, the
+    // adoption of its reviewed proposal and its approval do, because the server evaluates the
+    // whole policy. A Simple or Standard wallet refuses it, as the server does.
+    let custom = format!(
+        "{HEAD}    if ctx.request.amount < 1 {{\n        return Err(AllowitError::PaymentLimitExceeded);\n    }}\n    Ok(())\n}}\n"
+    );
+    std::fs::write(sandbox.work().join("custom.rs"), &custom).unwrap();
+    let native = sandbox.json(&["policy", "check", "custom.rs", "--kind", "native"]);
+    assert_eq!(
+        (
+            &native["profile"],
+            &native["placement"],
+            &native["canonicalOnly"]
+        ),
+        (
+            &serde_json::json!("server"),
+            &serde_json::json!("server"),
+            &serde_json::json!(false)
+        )
+    );
+    assert_eq!(native["serverFunctions"], serde_json::json!([]));
+    for kind in ["simple", "standard"] {
+        refused(
+            &["policy", "check", "custom.rs", "--kind", kind],
+            &["other custom code", "Native wallet"],
+        );
+    }
+    let contract = sandbox.json(&["policy", "check", "custom.rs", "--kind", "custom"]);
+    assert_eq!(contract["placement"], "contract");
+
     // Source for a contract: the portable profile, as before.
     let portable = sandbox.json(&["policy", "check", "policy.rs"]);
     assert_eq!(portable["profile"], "portable");
