@@ -437,8 +437,17 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
+    // A payment that the seller settles cannot settle before the seller has the
+    // authorization, and the authorization expires. So this step never waits for a
+    // settlement, also when it resumes a retained authorization: the settlement is read
+    // after the seller's reply.
+    let pay_wait = if challenge.settled_by == SettledBy::Seller {
+        Duration::ZERO
+    } else {
+        call.wait
+    };
     let (mut receipt, mut payment_limits, paid_by, lookup) =
-        pay(cx, &challenge, &digest, request_id, call.wait)?;
+        pay(cx, &challenge, &digest, request_id, pay_wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
     // The proof holds the receipt as the server sent it; the shown receipt adds what its
     // evaluation cost the policy owner.
