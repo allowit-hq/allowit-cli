@@ -259,7 +259,7 @@ fn pay(
             } else if challenge.settled_by == SettledBy::Seller {
                 // The seller did not settle it, or this client holds no proof of its end yet.
                 format!(
-                    "the payment authorization of request {paid_by} is not settled. It moves no funds unless the seller settles it before it expires, and it is never signed again. Run the command with a new request ID for a new payment"
+                    "the payment authorization of request {paid_by} is not settled, and its end is not established: the seller can still settle it until it expires. It is never signed again. Read it with status {paid_by} until that shows a settlement or the expiry, and start no new payment for this resource before then: a new payment beside a settled one pays twice"
                 )
             } else {
                 format!(
@@ -489,6 +489,13 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         match settlement(cx, &paid_by, call.wait) {
             Ok((mut settled, limits)) => {
                 lookup.attach(&mut settled, &paid_by);
+                // A charge lookup that fails now does not hide the charge that the first
+                // receipt holds.
+                if settled.get(crate::credits::KEY).is_none()
+                    && let Some(charge) = receipt.get(crate::credits::KEY)
+                {
+                    settled[crate::credits::KEY] = charge.clone();
+                }
                 receipt = settled;
                 payment_limits = limits;
             }
