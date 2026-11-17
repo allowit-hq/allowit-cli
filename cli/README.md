@@ -195,14 +195,18 @@ Its session stays in memory and is bound to that backend, Origin and owner accou
 replace it with `--installation ID` and that installation's kind. Selection never falls back between them.
 `--kind` selects one of four wallet kinds. The SDK describes them, and each rail lists the kinds that it supports:
 
-| Kind | Enforcement | Funds |
-| --- | --- | --- |
-| `native` | Allowit enforces the policy offchain | A keypair account |
-| `simple` | Allowit enforces the policy offchain, as for `native` | A smart-contract wallet |
-| `standard` | A smart-contract wallet enforces the standard policy onchain for the [supported params](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters) | The same wallet |
-| `custom` | A custom contract, built from the policy source, enforces the policy onchain | The same contract |
+`native` is the recommended kind: the agent's own wallet pays every x402 seller, and the seller's facilitator pays the network fee.
+A contract wallet (`simple`, `standard`, `custom`) pays only sellers that accept a settled payment as proof, and each payment runs the wallet contract on chain.
 
-`allowit policy kinds` prints each kind of the selected rail with its explanation, enforcement and custody, and for `standard` its supported params and their link.
+| Kind | What it is | Pays | Network fee |
+| --- | --- | --- | --- |
+| `native` (recommended) | The agent's own wallet. Allowit checks each payment against the policy before it co-signs | Every x402 seller | The lowest: none when the seller's facilitator settles the payment |
+| `simple` | A contract wallet holds the funds. Allowit checks each payment, as for `native` | Fewer sellers: only those that accept a settled payment as proof | Higher: each payment runs the wallet contract on chain |
+| `standard` | A contract wallet enforces the standard rules on chain, for the [supported params](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters) | As `simple` | As `simple` |
+| `custom` | A contract built from the policy source enforces all of it on chain | As `simple` | As `simple` |
+
+`allowit policy kinds` prints each kind of the selected rail with its explanation, the sellers that it pays (`pays`), its network fee (`fee`), enforcement and custody, and for `standard` its supported params and their link. The recommended kind has the row `recommended  yes`. `policy generate --help` prints the same text.
+The owner of a `native` wallet first creates the agent's wallet account with `allowit wallet setup`, then drafts with `policy generate --kind native --installation ID`.
 `allowit policy kinds --server` reads `GET /api/wallet-kinds` and prints the kinds that the `ALLOWIT_URL` server accepts on the rail. `--json` prints the list as an array.
 Kind ids are exact. A kind that the rail does not support exits 3 before any key or network access.
 The CLI selects the rail's wallet profile for the kind. A rail can install `simple` and `standard` through one profile.

@@ -29,8 +29,9 @@ pub(crate) fn flag_help() -> String {
     )
 }
 
-/// The help section that explains every kind: its title, explanation and,
-/// when the kind has a fixed list of params, where that list is.
+/// The help section that explains every kind: its title and explanation, the
+/// sellers that it pays, its network fee and, when the kind has a fixed list
+/// of params, where that list is. The recommended kind is marked.
 pub(crate) fn help_section() -> String {
     let width = WalletKind::ALL
         .iter()
@@ -41,11 +42,18 @@ pub(crate) fn help_section() -> String {
     for kind in WalletKind::ALL {
         let info = kind.info();
         text.push_str(&format!(
-            "\n  {:width$}  {}: {}",
+            "\n  {:width$}  {}{}: {}",
             kind.id(),
             info.title,
+            if info.recommended {
+                " (recommended)"
+            } else {
+                ""
+            },
             info.explanation
         ));
+        text.push_str(&format!("\n  {:width$}  Pays: {}", "", info.pays));
+        text.push_str(&format!("\n  {:width$}  Network fee: {}", "", info.fee));
         if let Some(url) = info.params_url {
             text.push_str(&format!("\n  {:width$}  Supported params: {url}", ""));
         }
@@ -129,6 +137,15 @@ pub(crate) struct Kind {
     pub id: WalletKind,
     pub title: String,
     pub explanation: String,
+    /// The kind that hosts recommend to an owner who deploys.
+    #[serde(default)]
+    pub recommended: bool,
+    /// The sellers that a wallet of this kind pays. Empty from a server that does not say.
+    #[serde(default)]
+    pub pays: String,
+    /// What a payment costs the wallet in network fee. Empty from a server that does not say.
+    #[serde(default)]
+    pub fee: String,
     pub enforcement: Enforcement,
     pub custody: WalletCustody,
     #[serde(default)]
@@ -142,6 +159,9 @@ impl From<&WalletKindInfo> for Kind {
             id: info.id,
             title: info.title.into(),
             explanation: info.explanation.into(),
+            recommended: info.recommended,
+            pays: info.pays.into(),
+            fee: info.fee.into(),
             enforcement: info.enforcement,
             custody: info.custody,
             supported_params: info.supported_params.iter().map(|p| (*p).into()).collect(),
@@ -158,6 +178,18 @@ impl Kind {
             ("id", self.id.id().to_owned()),
             ("title", self.title.clone()),
             ("explanation", self.explanation.clone()),
+        ];
+        // The recommendation and what the owner compares: the sellers and the fee.
+        if self.recommended {
+            rows.push(("recommended", "yes".to_owned()));
+        }
+        if !self.pays.is_empty() {
+            rows.push(("pays", self.pays.clone()));
+        }
+        if !self.fee.is_empty() {
+            rows.push(("fee", self.fee.clone()));
+        }
+        rows.extend([
             (
                 "enforcement",
                 word(serde_json::to_value(self.enforcement).unwrap_or_default()),
@@ -166,7 +198,7 @@ impl Kind {
                 "custody",
                 word(serde_json::to_value(self.custody).unwrap_or_default()),
             ),
-        ];
+        ]);
         if !self.supported_params.is_empty() {
             rows.push(("supportedParams", self.supported_params.join(", ")));
         }
@@ -200,12 +232,56 @@ mod tests {
         let help = help_section();
         for kind in WalletKind::ALL {
             let info = kind.info();
-            assert!(help.contains(&format!("{}: {}", info.title, info.explanation)));
+            let mark = if info.recommended {
+                " (recommended)"
+            } else {
+                ""
+            };
+            assert!(help.contains(&format!("{}{mark}: {}", info.title, info.explanation)));
+            assert!(help.contains(&format!("Pays: {}", info.pays)));
+            assert!(help.contains(&format!("Network fee: {}", info.fee)));
             if let Some(url) = info.params_url {
                 assert!(help.contains(url));
             }
         }
+        // One kind is recommended, and help marks only that one.
+        assert_eq!(help.matches("(recommended)").count(), 1);
+        assert!(help.contains("Native (recommended): "));
         assert!(flag_help().contains("native, simple, standard, custom"));
+    }
+
+    #[test]
+    fn a_listed_kind_shows_its_recommendation_its_sellers_and_its_fee() {
+        let native = Kind::from(WalletKind::Native.info());
+        let rows = native.rows();
+        let row = |name: &str| {
+            rows.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(row("recommended"), Some("yes"));
+        assert_eq!(row("pays"), Some(WalletKind::Native.info().pays));
+        assert_eq!(row("fee"), Some(WalletKind::Native.info().fee));
+        let json = serde_json::to_value(&native).unwrap();
+        assert_eq!(json["recommended"], true);
+        assert_eq!(json["pays"], WalletKind::Native.info().pays);
+        // Another kind has no recommendation row, and it states its sellers and its fee.
+        let standard = Kind::from(WalletKind::Standard.info());
+        assert!(standard.rows().iter().all(|(key, _)| *key != "recommended"));
+        assert!(standard.rows().iter().any(|(key, _)| *key == "pays"));
+        // A server of an earlier release lists a kind without these fields.
+        let earlier: Kind = serde_json::from_value(serde_json::json!({
+            "id": "native", "title": "Native", "explanation": "An earlier text.",
+            "enforcement": "offchain", "custody": "keypair"
+        }))
+        .unwrap();
+        assert!(!earlier.recommended && earlier.pays.is_empty() && earlier.fee.is_empty());
+        assert!(
+            earlier
+                .rows()
+                .iter()
+                .all(|(key, _)| !["recommended", "pays", "fee"].contains(key))
+        );
     }
 
     #[test]
@@ -249,6 +325,8 @@ mod tests {
                 match &json[key] {
                     Value::String(value) => assert_eq!(value, &text),
                     Value::Array(values) => assert_eq!(values.len(), text.split(", ").count()),
+                    // Only the recommended kind has the row, and it says yes.
+                    Value::Bool(true) => assert_eq!(text, "yes"),
                     other => panic!("{key}: {other}"),
                 }
             }

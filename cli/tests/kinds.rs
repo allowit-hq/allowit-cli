@@ -80,15 +80,27 @@ fn generate_help_explains_every_kind_with_the_sdk_text() {
     assert!(help.contains("native, simple, standard, custom"));
     for kind in WalletKind::ALL {
         let info = kind.info();
-        let line = format!("{}: {}", info.title, info.explanation);
-        assert!(
-            help.lines().any(|l| l.trim_end().ends_with(&line)),
-            "{line}"
-        );
+        // The recommended kind is marked, and every kind states its sellers and its fee.
+        let mark = if info.recommended {
+            " (recommended)"
+        } else {
+            ""
+        };
+        for line in [
+            format!("{}{mark}: {}", info.title, info.explanation),
+            format!("Pays: {}", info.pays),
+            format!("Network fee: {}", info.fee),
+        ] {
+            assert!(
+                help.lines().any(|l| l.trim_end().ends_with(&line)),
+                "{line}"
+            );
+        }
         if let Some(url) = info.params_url {
             assert!(help.contains(&format!("Supported params: {url}")));
         }
     }
+    assert_eq!(help.matches("(recommended)").count(), 1, "{help}");
     assert!(!help.contains("common"), "{help}");
 }
 
