@@ -192,8 +192,16 @@ fn rows(document: &Value) -> (Vec<(String, String)>, Vec<LimitReport>) {
     if let Some(charged) = &charged {
         rows.push((FEE_CHARGED.into(), charged.text.clone()));
     }
+    // What the evaluation cost the policy owner in credits.
+    let credits = map
+        .get(crate::credits::KEY)
+        .and_then(crate::credits::Charge::of);
+    if let Some(credits) = &credits {
+        rows.push((crate::credits::KEY.into(), credits.text()));
+    }
     for (key, value) in map {
         let shown = leading.contains(&key.as_str())
+            || (key == crate::credits::KEY && credits.is_some())
             || (key == Settlement::KEY && settlement.is_some())
             || (key == FEE_CHARGED && charged.is_some())
             || (key == Limits::KEY && limits.is_some())
@@ -294,6 +302,34 @@ mod tests {
                  lifetime_spending_limit  100 XYZ  5.0123456 XYZ  94.9876544 XYZ\n"
             )
         );
+    }
+
+    /// The receipt shows what the evaluation cost the policy owner in credits, on one row
+    /// after the fee. JSON keeps the charge as an object.
+    #[test]
+    fn a_receipt_shows_the_credits_of_its_evaluation() {
+        let charge = json!({
+            "charged": "1.1", "tariff": "2026-11-14", "paidBy": "owner",
+            "lines": [{"item": "base", "credits": "1.0"}, {"item": "decision_api", "credits": "0.1"}],
+        });
+        let mut document = settled();
+        document["credits"] = charge.clone();
+        let shown = text(document.clone());
+        assert!(
+            shown.contains(
+                "feeCharged       0.0123456 XYZ\ncredits          1.1 (base 1.0, decision api 0.1), charged to the policy owner, price list 2026-11-14\n"
+            ),
+            "{shown}"
+        );
+        assert!(!shown.contains("credits."), "{shown}");
+        let mut out = Out::new(true, true, false, true);
+        show(&mut out, "example:none", document, &[]);
+        let value: Value = serde_json::from_str(&out.stdout).unwrap();
+        assert_eq!(value["credits"], charge);
+        // A charge that is not plain text prints as data rows, never as one trusted row.
+        let mut odd = settled();
+        odd["credits"] = json!({"charged": "1.0\u{1b}[31m", "tariff": "v", "lines": []});
+        assert!(text(odd).contains("credits.charged"));
     }
 
     #[test]

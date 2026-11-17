@@ -195,7 +195,7 @@ fn pay(
     request: &str,
     request_id: String,
     wait: Duration,
-) -> Result<(Value, Vec<PaymentLimit>, String)> {
+) -> Result<(Value, Vec<PaymentLimit>, String, crate::credits::Lookup)> {
     let planned = exec::plan(
         exec::RequestArgs {
             op: "transfer".into(),
@@ -212,6 +212,7 @@ fn pay(
         cx,
     )?;
     let adapter = planned.adapter;
+    let lookup = adapter.charge_lookup(cx, &planned.binding, None, &request_id);
     let result = adapter.exec_outcome(cx, &planned.request, planned.binding);
     let code = match &result {
         Ok((outcome, _)) => exit::execution_status(outcome.status.clone()).code(),
@@ -234,13 +235,22 @@ fn pay(
             let (outcome, payment) = adapter.status_outcome(cx, &original, binding, wait, None)?;
             (outcome, payment, original)
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            // A denied payment was evaluated: its error shows what that cost the owner.
+            if crate::credits::charged_denial(&error) {
+                cx.out.credits = lookup.read(&request_id);
+            }
+            return Err(error);
+        }
     };
     // A seller that settles the payment itself takes the signed authorization:
     // the operation is `submitted` once both the agent and the server signed it.
     let authorized =
         challenge.settled_by == SettledBy::Seller && outcome.status == Status::Submitted;
     if outcome.status != Status::Confirmed && !authorized {
+        // The payment was evaluated, whatever its transaction did: the error shows what
+        // that cost the owner. A resumed payment names its original request.
+        cx.out.credits = lookup.read(&paid_by);
         let mut error = Error::uncertain(
             if challenge.settled_by == SettledBy::Seller && outcome.status == Status::Failed {
                 format!(
@@ -256,7 +266,7 @@ fn pay(
         error.code = exit::execution_status(outcome.status).code();
         return Err(error);
     }
-    Ok((outcome.document, payment, paid_by))
+    Ok((outcome.document, payment, paid_by, lookup))
 }
 
 /// The outcome of request `id` as the server reads it from the ledger, within
@@ -422,9 +432,15 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         }
     };
     let rail = cx.rail()?;
-    let (mut receipt, mut payment_limits, paid_by) =
+    let (mut receipt, mut payment_limits, paid_by, lookup) =
         pay(cx, &challenge, &digest, request_id, call.wait)?;
     let proof = paid_service::proof(&challenge, &receipt)?;
+    // The proof holds the receipt as the server sent it; the shown receipt adds what its
+    // evaluation cost the policy owner.
+    lookup.attach(&mut receipt, &paid_by);
+    // The owner paid for the evaluation whatever the seller does next: an error after the
+    // payment shows the charge, and a delivered resource shows it in its receipt.
+    cx.out.credits = crate::credits::Charge::of(&receipt[crate::credits::KEY]);
     let seller_settles = challenge.settled_by == SettledBy::Seller;
     // What the caller does after a seller that failed. A signed authorization moves no funds
     // until the seller's facilitator submits it, and it expires.
@@ -457,7 +473,8 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         cx.out
             .progress("Reading the settlement of the payment from the ledger");
         match settlement(cx, &paid_by, call.wait) {
-            Ok((settled, limits)) => {
+            Ok((mut settled, limits)) => {
+                lookup.attach(&mut settled, &paid_by);
                 receipt = settled;
                 payment_limits = limits;
             }
@@ -467,6 +484,8 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
             )),
         }
     }
+    // The resource is delivered: its receipt carries the charge.
+    cx.out.credits = None;
     Ok(delivered(
         second,
         Some(Payment {

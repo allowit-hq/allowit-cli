@@ -378,6 +378,61 @@ fn an_active_policy_prints_trust_import_and_payment_with_its_real_values() {
     });
 }
 
+/// The help says what one request costs the policy owner in credits and that the agent needs
+/// none. When the owner cannot pay, it says what the refusal will be.
+#[test]
+fn the_help_shows_the_credits_that_each_request_costs_the_owner() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let mut sandbox = Sandbox::new("policy-help-credits");
+        let mut body = facts(net, "draft");
+        body["credits"] = json!({"evaluation": "1.5", "tariff": "2026-11-14", "ownerCanPay": true});
+        let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(200, body.clone())]);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        let text = stdout(&output);
+        assert!(
+            text.contains("1.5 per request, charged to the owner (price list 2026-11-14)\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Credits: Allowit charges the policy owner 1.5 credits for each request that it evaluates, also for a denied one. You need no credits of your own.\n"),
+            "{text}"
+        );
+        assert!(!text.contains("credits_exhausted"), "{text}");
+        let (output, _) = served(
+            &mut sandbox,
+            &["--json", ID, "help"],
+            vec![(200, body.clone())],
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value["credits"],
+            json!({"evaluation": "1.5", "tariff": "2026-11-14", "paidBy": "owner", "ownerCanPay": true})
+        );
+        // An owner without credits: the agent learns what the refusal will be and whom to tell.
+        body["credits"]["ownerCanPay"] = json!(false);
+        let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(200, body.clone())]);
+        let text = stdout(&output);
+        assert!(
+            text.contains("The owner has no credits left now: Allowit refuses each request with `credits_exhausted` until the owner gets credits. Tell the owner."),
+            "{text}"
+        );
+        // A server of an earlier release sends no credits: the help has no such line.
+        let (output, _) = served(
+            &mut sandbox,
+            &[ID, "help"],
+            vec![(200, facts(net, "draft"))],
+        );
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        assert!(!stdout(&output).contains("redits"), "{}", stdout(&output));
+        // Credits that are no plain amount are refused, never printed.
+        body["credits"]["evaluation"] = json!("1.5\u{1b}[31m");
+        let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(200, body)]);
+        assert_eq!(code(&output), Some(5), "{}", stderr(&output));
+        assert!(!stdout(&output).contains("per request"));
+    });
+}
+
 #[test]
 fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes() {
     every_rail(|rail| {

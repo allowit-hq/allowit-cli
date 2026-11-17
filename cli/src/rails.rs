@@ -386,9 +386,54 @@ impl Rail {
             )?);
             return Ok(0);
         }
-        let (out, payment) = self.exec_outcome(cx, r, binding)?;
+        let lookup = self.charge_lookup(cx, &binding, None, &r.request_id);
+        let (mut out, payment) = match self.exec_outcome(cx, r, binding) {
+            Ok(result) => result,
+            Err(error) => {
+                // A denied request was evaluated: its error shows what that cost the owner.
+                if crate::credits::charged_denial(&error) {
+                    cx.out.credits = lookup.read(&r.request_id);
+                }
+                return Err(error);
+            }
+        };
+        lookup.attach(&mut out.document, &r.request_id);
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
+    }
+    /// Where the charge of the request `id` under `binding` is read, and its
+    /// policy. The server is the one of the profile. A retained request has
+    /// no profile: its server is the origin that the journal keeps for it
+    /// (`backend`, or the journal entry of `id`). The retained operation
+    /// itself does not show its origin, so a retained request without a
+    /// journal origin reads no charge: `ALLOWIT_URL` can name another server.
+    pub(crate) fn charge_lookup(
+        &self,
+        cx: &mut Ctx,
+        binding: &Binding,
+        backend: Option<&str>,
+        id: &str,
+    ) -> crate::credits::Lookup {
+        let origin = binding
+            .profile
+            .as_ref()
+            .map(|profile| profile.server_origin().to_owned())
+            .or_else(|| backend.map(str::to_owned))
+            .or_else(|| {
+                let dir = cx.dir().ok()?;
+                crate::settings::journal::load(&dir, id)
+                    .ok()
+                    .flatten()?
+                    .server_origin
+            })
+            .or_else(|| {
+                binding
+                    .recovery
+                    .is_none()
+                    .then(|| cx.server_url().ok())
+                    .flatten()
+            });
+        crate::credits::Lookup::new(origin, binding.policy.clone())
     }
     /// Sends one request and returns its outcome with the per-payment limits
     /// of its profile, and prints nothing. `exec` prints the receipt; a paid
@@ -456,7 +501,9 @@ impl Rail {
         wait: Duration,
         backend: Option<&str>,
     ) -> Result<i32> {
-        let (out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
+        let lookup = self.charge_lookup(cx, &binding, backend, id);
+        let (mut out, payment) = self.status_outcome(cx, id, binding, wait, backend)?;
+        lookup.attach(&mut out.document, id);
         crate::receipt::show(&mut cx.out, self.0.id, out.document, &payment);
         Ok(crate::exit::execution_status(out.status).code())
     }

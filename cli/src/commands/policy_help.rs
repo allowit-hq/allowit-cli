@@ -52,6 +52,19 @@ pub(crate) struct Facts {
     pub limits: Vec<Limit>,
     #[serde(default)]
     pub profile: Option<Value>,
+    #[serde(default)]
+    pub credits: Option<CreditFacts>,
+}
+
+/// What an evaluation of the policy costs its owner, and whether the owner
+/// can pay one now.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreditFacts {
+    pub evaluation: String,
+    pub tariff: String,
+    #[serde(default)]
+    pub owner_can_pay: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +270,29 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         "awaiting_agent_key" | "draft" | "active" | "inactive" => facts.state.as_str(),
         _ => return Err(invalid()),
     };
+    // The price of one evaluation, which the owner pays. A server of an earlier release
+    // sends none.
+    let credits = facts
+        .credits
+        .as_ref()
+        .map(|credits| {
+            let plain = crate::credits::Charge::of(&json!({
+                "charged": credits.evaluation, "tariff": credits.tariff, "lines": [],
+            }))
+            .ok_or_else(invalid)?;
+            Ok((plain.charged, plain.tariff, credits.owner_can_pay))
+        })
+        .transpose()?;
+    let credits_note = credits.as_ref().map(|(evaluation, _, can_pay)| {
+        let unpaid = if *can_pay == Some(false) {
+            " The owner has no credits left now: Allowit refuses each request with `credits_exhausted` until the owner gets credits. Tell the owner."
+        } else {
+            ""
+        };
+        format!(
+            "Credits: Allowit charges the policy owner {evaluation} credits for each request that it evaluates, also for a denied one. You need no credits of your own.{unpaid}"
+        )
+    });
     // The local key of this policy's agent, if this device holds it.
     let local = match &agent_key {
         Some(agent) => {
@@ -482,6 +518,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             "steps": steps.iter().map(|step| json!({"title": step.title, "note": step.note, "commands": step.commands})).collect::<Vec<_>>(),
             "examples": examples.iter().map(|(name, command)| (name.to_string(), json!(command))).collect::<serde_json::Map<_, _>>(),
             "limits": limits.iter().map(|(key, label, value)| json!({"key": key, "label": label, "value": value})).collect::<Vec<_>>(),
+            "credits": credits.as_ref().map(|(evaluation, tariff, can_pay)| json!({
+                "evaluation": evaluation, "tariff": tariff, "paidBy": "owner", "ownerCanPay": can_pay,
+            })),
+            "creditsNote": credits_note,
             "next": next,
             "rules": rules,
             "guide": "allowit guide",
@@ -518,6 +558,12 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     if let Some(server_key) = &server_key {
         rows.push(("server key".into(), server_key.clone()));
     }
+    if let Some((evaluation, tariff, _)) = &credits {
+        rows.push((
+            "credits".into(),
+            format!("{evaluation} per request, charged to the owner (price list {tariff})"),
+        ));
+    }
     out.stdout.push_str(&crate::term::render(&rows));
     if server_key.is_some() {
         out.line(SERVER_KEY_CHECK);
@@ -547,6 +593,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             .map(|(_, label, value)| (format!("  {label}"), value.clone()))
             .collect();
         out.stdout.push_str(&crate::term::render(&rows));
+    }
+    if let Some(note) = &credits_note {
+        out.line("");
+        out.line(note);
     }
     if let Some(next) = &next {
         out.line("");
