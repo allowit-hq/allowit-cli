@@ -1,6 +1,6 @@
 //! `install.sh`: a release binary is installed only when its SHA-256 matches the release's
-//! list, and a dry run changes nothing. The release files come from a local folder, so the
-//! test uses no network.
+//! list, a dry run changes nothing, and the ref to install is a plain name or nothing runs.
+//! The release files come from a local folder, so the tests use no network.
 #![cfg(unix)]
 use std::{path::Path, process::Command};
 
@@ -72,7 +72,10 @@ fn install(root: &Path, release: &Path, extra: &[(&str, &str)]) -> std::process:
         )
         // A failed release path must not start a source build in a test.
         .env("ALLOWIT_NO_DEPS", "1")
-        .env("ALLOWIT_REF", "0000000000000000000000000000000000000000");
+        .env(
+            "ALLOWIT_CLI_REF",
+            "0000000000000000000000000000000000000000",
+        );
     for (name, value) in extra {
         command.env(name, value);
     }
@@ -148,5 +151,134 @@ fn a_release_binary_is_installed_only_when_its_checksum_matches() {
     let log = String::from_utf8_lossy(&pinned.stderr).into_owned();
     assert!(log.contains("(v9.9.9)"), "{log}");
     assert!(!log.contains("(main)"), "{log}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Runs the script with these settings only, in a dry run that installs no tool. The folder
+/// `root` is HOME and the working directory.
+fn plan(root: &Path, settings: &[(&str, &str)]) -> std::process::Output {
+    let mut command = Command::new("sh");
+    command
+        .arg(script())
+        .current_dir(root)
+        .env("HOME", root)
+        .env("PATH", path_with(&root.join("bin")))
+        .env("ALLOWIT_NO_DEPS", "1")
+        .env("ALLOWIT_DRY_RUN", "1")
+        .env_remove("ALLOWIT_CLI_REF")
+        .env_remove("ALLOWIT_REF")
+        .env_remove("ALLOWIT_VERSION")
+        .env_remove("ALLOWIT_RELEASE_URL")
+        .env_remove("ALLOWIT_FROM_SOURCE");
+    for (name, value) in settings {
+        command.env(name, value);
+    }
+    command.output().unwrap()
+}
+
+fn scratch(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("allowit-install-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+/// The ref goes into URLs and git arguments. A value that is not a plain name stops the
+/// script at once: no command of the value runs and no file appears.
+#[test]
+fn a_ref_that_is_not_a_plain_name_is_refused_before_anything_runs() {
+    let root = scratch("ref");
+    let long = "a".repeat(65);
+    for hostile in [
+        "main; touch owned",
+        "main$(touch owned)",
+        "main`touch owned`",
+        "main|touch owned",
+        "main&&touch owned",
+        "main\ntouch owned",
+        "main touch",
+        "../main",
+        "a..b",
+        "fix/main",
+        "-main",
+        ".main",
+        "main'",
+        "main\"",
+        "ma\u{e9}n",
+        long.as_str(),
+    ] {
+        for name in ["ALLOWIT_CLI_REF", "ALLOWIT_VERSION"] {
+            let refused = plan(&root, &[(name, hostile)]);
+            assert_eq!(
+                refused.status.code(),
+                Some(1),
+                "{name}={hostile:?}: {refused:?}"
+            );
+            let log = String::from_utf8_lossy(&refused.stderr).into_owned();
+            assert!(
+                log.contains(&format!("{name} must be")),
+                "{name}={hostile:?}: {log}"
+            );
+            assert!(log.contains("Nothing was installed"), "{log}");
+            // The refusal does not repeat the value.
+            assert!(!log.contains("touch"), "{log}");
+            assert!(refused.stdout.is_empty(), "{refused:?}");
+        }
+    }
+    // The script ran in this folder: nothing in it, so no part of a value ran as a command.
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Releases are cut from the release branch. Another branch is built from source at that
+/// branch, and the script never asks GitHub for a release binary of it.
+#[test]
+fn a_branch_other_than_the_release_branch_is_built_from_source() {
+    if Command::new("cargo").arg("--version").output().is_err() {
+        return;
+    }
+    let root = scratch("branch");
+    let linked = plan(&root, &[("ALLOWIT_CLI_REF", "staging")]);
+    assert!(linked.status.success(), "{linked:?}");
+    let log = String::from_utf8_lossy(&linked.stderr).into_owned();
+    assert!(
+        log.contains("staging is not the release branch (main)"),
+        "{log}"
+    );
+    assert!(log.contains("allowit-cli at staging with cargo"), "{log}");
+    assert!(!log.contains("release binary https"), "{log}");
+
+    // The release branch, named or not, takes the release path: here a mirror that is empty.
+    let mirror = format!("file://{}", root.join("none").display());
+    for settings in [
+        vec![("ALLOWIT_RELEASE_URL", mirror.as_str())],
+        vec![
+            ("ALLOWIT_RELEASE_URL", mirror.as_str()),
+            ("ALLOWIT_CLI_REF", "main"),
+        ],
+    ] {
+        let release = plan(&root, &settings);
+        assert!(release.status.success(), "{release:?}");
+        let log = String::from_utf8_lossy(&release.stderr).into_owned();
+        assert!(log.contains("the release has no binaries"), "{log}");
+        assert!(log.contains("allowit-cli at main with cargo"), "{log}");
+    }
+
+    // A release is a revision of the release branch: with it, the branch stays main.
+    let both = plan(
+        &root,
+        &[
+            ("ALLOWIT_CLI_REF", "staging"),
+            ("ALLOWIT_VERSION", "v9.9.9"),
+        ],
+    );
+    assert_eq!(both.status.code(), Some(1), "{both:?}");
+    assert!(String::from_utf8_lossy(&both.stderr).contains("Set one of them"));
+    // The earlier name of the setting is refused, so no other revision is installed for it.
+    let earlier = plan(&root, &[("ALLOWIT_REF", "staging")]);
+    assert_eq!(earlier.status.code(), Some(1), "{earlier:?}");
+    assert!(
+        String::from_utf8_lossy(&earlier.stderr).contains("ALLOWIT_REF is now ALLOWIT_CLI_REF")
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
