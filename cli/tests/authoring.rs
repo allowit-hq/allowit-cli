@@ -34,73 +34,124 @@ fn check_compile_type_checks_what_structural_admission_accepts() {
     sandbox.ok(&["policy", "check", "policy.rs"]);
 }
 
-/// A policy is checked with the profile of the place that evaluates it. The paper's kind of
-/// policy reads its owner's text from params and passes it to server functions: the server
-/// evaluates it, and the check gives the verdict of the server's gate. A contract compiles
-/// every other policy, and the portable profile checks it.
+/// A policy is checked with the profile of the wallet kind that holds it. The paper's kind of
+/// policy reads its owner's text from params and passes it to server functions: only a keypair
+/// wallet holds it, because the server keeps that wallet's params, and the check gives the
+/// verdict of the server's gate. A contract wallet holds its source on chain: the portable
+/// profile checks it, also when it calls a server function.
 #[test]
-fn check_uses_the_profile_of_the_place_that_evaluates_the_policy() {
+fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     const HEAD: &str = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n";
+    // The question is the owner's text param.
     let asks = format!(
         "{HEAD}    let question: String = allowit::param(ctx, \"question\");\n    allowit::new_decision_context(ctx, None)?;\n    allowit::decision(ctx, &allowit::AllowitDecision {{\n        id: \"purchase\",\n        query: question.as_str(),\n        deny_below: 3000,\n        allow_above: 8000,\n    }})?;\n    Ok(())\n}}\n"
     );
+    // The question is in the source.
+    let states = asks
+        .replace(
+            "    let question: String = allowit::param(ctx, \"question\");\n",
+            "",
+        )
+        .replace(
+            "question.as_str()",
+            "\"Is this payment for research data?\"",
+        );
+    // Owner text without a server function.
     let reads = format!(
         "{HEAD}    let note: String = allowit::param(ctx, \"note\");\n    match note.as_str() {{\n        \"open\" => Ok(()),\n        _ => Err(AllowitError::InvalidParam),\n    }}\n}}\n"
     );
     let sandbox = Sandbox::new("placement");
-    std::fs::write(sandbox.work().join("asks.rs"), &asks).unwrap();
-    std::fs::write(sandbox.work().join("reads.rs"), &reads).unwrap();
+    for (name, source) in [
+        ("asks.rs", &asks),
+        ("states.rs", &states),
+        ("reads.rs", &reads),
+    ] {
+        std::fs::write(sandbox.work().join(name), source).unwrap();
+    }
     std::fs::write(
         sandbox.work().join("policy.rs"),
         include_str!("../templates/policy/src/policy.rs"),
     )
     .unwrap();
+    let called = serde_json::json!(["allowit::new_decision_context", "allowit::decision"]);
+    let refused = |args: &[&str], words: &[&str]| {
+        let output = sandbox.run(args);
+        assert_eq!(code(&output), Some(2), "{args:?}: {}", stderr(&output));
+        assert!(output.stdout.is_empty(), "{args:?}");
+        for word in words {
+            assert!(
+                stderr(&output).contains(word),
+                "{args:?}: {}",
+                stderr(&output)
+            );
+        }
+    };
 
-    // A policy that calls a server function: the server profile, also with --compile.
-    let checked = sandbox.json(&["policy", "check", "asks.rs"]);
-    assert_eq!(checked["placement"], "server");
-    assert_eq!(
-        checked["serverFunctions"],
-        serde_json::json!(["allowit::new_decision_context", "allowit::decision"])
-    );
-    assert_eq!(checked["prefix"], serde_json::json!(["payment_limit"]));
-    assert_eq!(checked["sourceHash"], allowit_sdk::digest(asks.as_bytes()));
-    for kind in ["native", "simple", "standard"] {
-        let checked = sandbox.json(&["policy", "check", "asks.rs", "--kind", kind]);
-        assert_eq!(checked["placement"], "server", "{kind}");
+    // The paper's kind of policy: a keypair wallet's policy, checked with the server profile.
+    for args in [
+        &["policy", "check", "asks.rs"][..],
+        &["policy", "check", "asks.rs", "--kind", "native"],
+        &["policy", "check", "asks.rs", "--compile"],
+    ] {
+        let checked = sandbox.json(args);
+        assert_eq!(checked["profile"], "server", "{args:?}");
+        assert_eq!(checked["placement"], "server", "{args:?}");
+        assert_eq!(checked["serverFunctions"], called, "{args:?}");
+        assert_eq!(checked["prefix"], serde_json::json!(["payment_limit"]));
+        assert_eq!(checked["sourceHash"], allowit_sdk::digest(asks.as_bytes()));
+        assert_eq!(checked["compiled"], args.contains(&"--compile"));
     }
-    let compiled = sandbox.json(&["policy", "check", "asks.rs", "--compile"]);
-    assert_eq!(
-        (&compiled["compiled"], &compiled["placement"]),
-        (&serde_json::json!(true), &serde_json::json!("server"))
+    // A contract wallet stores no owner text, and its rail checks the source with the
+    // portable profile: the same policy is refused for it, as its deployment would be.
+    for kind in ["simple", "standard"] {
+        refused(
+            &["policy", "check", "asks.rs", "--kind", kind],
+            &["the method `as_str`", "--kind native"],
+        );
+    }
+    refused(
+        &["policy", "check", "asks.rs", "--kind", "custom"],
+        &["allowit::decision"],
     );
-    // A Custom wallet compiles its whole source on chain: it cannot hold that policy.
-    let refused = sandbox.run(&["policy", "check", "asks.rs", "--kind", "custom"]);
-    assert_eq!(code(&refused), Some(2), "{}", stderr(&refused));
-    assert!(
-        stderr(&refused).contains("allowit::decision"),
-        "{}",
-        stderr(&refused)
-    );
-    assert!(refused.stdout.is_empty());
 
-    // Owner text without a server function: only a keypair wallet's policy may read it,
-    // because only the server evaluates that policy.
-    let refused = sandbox.run(&["policy", "check", "reads.rs"]);
-    assert_eq!(code(&refused), Some(2), "{}", stderr(&refused));
-    assert!(
-        stderr(&refused).contains("the method `as_str`"),
-        "{}",
-        stderr(&refused)
+    // A policy that calls a server function and states its text in the source: a Simple or
+    // Standard wallet holds it, the portable profile checks it, and the server evaluates it.
+    for args in [
+        &["policy", "check", "states.rs"][..],
+        &["policy", "check", "states.rs", "--kind", "simple"],
+        &[
+            "policy",
+            "check",
+            "states.rs",
+            "--kind",
+            "standard",
+            "--compile",
+        ],
+    ] {
+        let checked = sandbox.json(args);
+        assert_eq!(checked["profile"], "portable", "{args:?}");
+        assert_eq!(checked["placement"], "server", "{args:?}");
+        assert_eq!(checked["serverFunctions"], called, "{args:?}");
+    }
+    let native = sandbox.json(&["policy", "check", "states.rs", "--kind", "native"]);
+    assert_eq!(native["profile"], "server");
+    refused(
+        &["policy", "check", "states.rs", "--kind", "custom"],
+        &["allowit::decision"],
     );
-    assert!(
-        stderr(&refused).contains("--kind native"),
-        "{}",
-        stderr(&refused)
+
+    // Owner text without a server function: only a keypair wallet's policy.
+    let checked = sandbox.json(&["policy", "check", "reads.rs"]);
+    assert_eq!(
+        (&checked["profile"], &checked["placement"]),
+        (&serde_json::json!("server"), &serde_json::json!("server"))
     );
+    assert_eq!(checked["serverFunctions"], serde_json::json!([]));
     for kind in ["simple", "standard", "custom"] {
-        let refused = sandbox.run(&["policy", "check", "reads.rs", "--kind", kind]);
-        assert_eq!(code(&refused), Some(2), "{kind}: {}", stderr(&refused));
+        refused(
+            &["policy", "check", "reads.rs", "--kind", kind],
+            &["the method `as_str`", "--kind native"],
+        );
     }
     let native = sandbox.json(&[
         "policy",
@@ -110,12 +161,11 @@ fn check_uses_the_profile_of_the_place_that_evaluates_the_policy() {
         "native",
         "--compile",
     ]);
-    assert_eq!(native["placement"], "server");
-    assert_eq!(native["serverFunctions"], serde_json::json!([]));
     assert_eq!(native["compiled"], true);
 
     // Source for a contract: the portable profile, as before.
     let portable = sandbox.json(&["policy", "check", "policy.rs"]);
+    assert_eq!(portable["profile"], "portable");
     assert_eq!(portable["placement"], "contract");
     assert_eq!(portable["serverFunctions"], serde_json::json!([]));
     // A type error fails the compilation of a server policy too.
@@ -125,7 +175,8 @@ fn check_uses_the_profile_of_the_place_that_evaluates_the_policy() {
     )
     .unwrap();
     sandbox.ok(&["policy", "check", "wrong.rs"]);
-    let failed = sandbox.run(&["policy", "check", "wrong.rs", "--compile"]);
-    assert_eq!(code(&failed), Some(2), "{}", stderr(&failed));
-    assert!(stderr(&failed).contains("mismatched types"));
+    refused(
+        &["policy", "check", "wrong.rs", "--compile"],
+        &["mismatched types"],
+    );
 }
