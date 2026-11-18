@@ -10,8 +10,8 @@ Examples:
 
 Commands:
   search  Search the catalog of the ALLOWIT_URL server by meaning and keywords
-  ls      The page flags shared by `search` and `ls`
-  show    Show one catalog entry: its resource, methods and indicative terms
+  ls      List the catalog in entry order
+  show    Show one catalog entry: its listing, its access, what Allowit observed and its reputation
   help    Print this message or the help of the given subcommand(s)
 
 Options:

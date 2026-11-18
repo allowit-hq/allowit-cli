@@ -1,13 +1,32 @@
 {
   "tools": [
     {
-      "description": "Search the marketplace catalog of the configured Allowit server for paid services. Free. Listed prices are indicative; the seller states the price when called.",
+      "description": "Search the marketplace catalog of the configured Allowit server for paid services. Free. Listed prices are indicative; the seller states the price when called. Each entry keeps the seller's listing apart from what Allowit observed and from owners' reputation labels.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "access": {
+            "description": "Keep entries that offer this way to get them",
+            "enum": [
+              "payment",
+              "free",
+              "free_quota",
+              "signature",
+              "proof_of_work"
+            ],
+            "type": "string"
+          },
           "all_rails": {
             "description": "Include entries of every rail, not only of the selected one",
             "type": "boolean"
+          },
+          "asset": {
+            "description": "Keep entries that accept this asset reference",
+            "type": "string"
+          },
+          "capability": {
+            "description": "Keep entries whose listing names this capability, such as finance",
+            "type": "string"
           },
           "cursor": {
             "description": "nextCursor of the previous page",
@@ -31,7 +50,7 @@
       "name": "marketplace_search"
     },
     {
-      "description": "Read one marketplace catalog entry by its id: resource URL, methods and indicative terms. Free.",
+      "description": "Read one marketplace catalog entry by its id: resource URL, methods, indicative terms, access, what Allowit observed and reputation labels. Free.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

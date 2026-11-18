@@ -206,6 +206,96 @@ fn skills_search_ls_and_show_read_the_configured_server_only() {
     assert_eq!(engine.seen().len(), before);
 }
 
+/// An entry with what Allowit holds about it beside the seller's listing.
+fn detailed(resource: &str) -> Value {
+    let mut found = entry("sample/report", resource);
+    found["source"] = json!({"listing": "https://seller.example/openapi.json",
+        "captured": "wiki/providers/sample/report/README.md"});
+    found["operation"] = json!("transfer");
+    found["access"] = json!([{"kind": "payment", "protocol": "x402", "scheme": "exact",
+        "network": "example:testnet", "asset": "SAMPLE"},
+        {"kind": "proof_of_work", "detail": "A 16-bit SHA-256 solution within 300 seconds."}]);
+    found["observed"] = json!([{"fact": "response", "origin": "registry", "at": "2026-10-28T20:44:59Z",
+        "status": 402, "scheme": "exact", "asset": "SAMPLE", "amount": "2500000", "payable": true},
+        {"fact": "settlement", "origin": "server", "at": "2026-11-18", "count": 2,
+        "asset": "SAMPLE", "amount": "2500000"}]);
+    found["reputation"] = json!({"suitability": {"others": {"support": 0}},
+        "delivery": {"others": {"support": 5, "good": 55, "bad": 10}},
+        "quality": {"others": {"support": 0}}});
+    found["rank"] = json!({"score": 0.775, "relevance": 1.0, "reputation": 0.45, "terms": 0.75});
+    found
+}
+
+#[test]
+fn filters_reach_the_server_and_show_keeps_observations_apart_from_the_listing() {
+    let engine = Stub::new(|_, target| {
+        let found = detailed("https://seller.example/report");
+        if target.starts_with("/api/marketplace/search") {
+            (
+                200,
+                "application/json",
+                json!({"entries": [found], "ranking": "keyword", "catalog": "ab"}).to_string(),
+            )
+        } else {
+            (
+                200,
+                "application/json",
+                json!({"entry": found, "catalog": "ab"}).to_string(),
+            )
+        }
+    });
+    let mut sandbox = Sandbox::new("skills-filters");
+    sandbox.set("ALLOWIT_URL", &engine.url);
+    let text = sandbox.ok(&[
+        "skills",
+        "search",
+        "report",
+        "--access",
+        "proof-of-work",
+        "--capability",
+        "finance",
+        "--asset",
+        "SAMPLE",
+    ]);
+    assert!(
+        text.contains("ACCESS") && text.contains("payment, proof of work"),
+        "{text}"
+    );
+    sandbox.ok(&["skills", "ls", "--access", "free-quota"]);
+    assert_eq!(
+        engine.seen()[..2],
+        [
+            "GET /api/marketplace/search?q=report&asset=SAMPLE&access=proof_of_work&capability=finance",
+            "GET /api/marketplace/search?q=&access=free_quota",
+        ]
+    );
+    let rows = sandbox.ok(&["skills", "show", "sample/report"]);
+    for line in [
+        "listedPrice  0.25 sample units",
+        "listedAt     https://seller.example/openapi.json",
+        "operation    transfer",
+        "access       payment: x402 exact example:testnet SAMPLE",
+        "access       proof of work: A 16-bit SHA-256 solution within 300 seconds.",
+        "observed     HTTP 402 read by the registry check on 2026-10-28T20:44:59Z: offer exact 2500000 SAMPLE",
+        "observed     2 payment(s) settled by this server, the latest on 2026-11-18: 2500000 SAMPLE",
+        "suitability  other owners unknown",
+        "delivery     other owners 5 (good 55, bad 10)",
+    ] {
+        assert!(rows.contains(line), "{line}\n{rows}");
+    }
+    common::assert_data(&rows, "skills show");
+    let page = sandbox.json(&["skills", "search", "report"]);
+    assert_eq!(page["entries"][0]["rank"]["score"], 0.775);
+    assert_eq!(page["entries"][0]["observed"][1]["origin"], "server");
+    // An unknown kind never leaves the command.
+    let before = engine.seen().len();
+    assert_eq!(
+        code(&sandbox.run(&["skills", "ls", "--access", "gift"])),
+        Some(2)
+    );
+    assert_eq!(engine.seen().len(), before);
+}
+
 #[test]
 fn a_server_entry_with_an_unsafe_resource_is_refused() {
     let engine = engine("javascript:alert(1)".into());
