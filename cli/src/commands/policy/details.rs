@@ -8,10 +8,12 @@
 //! The classification is a fixed list of English patterns over the question text, matched
 //! without regard to case:
 //!
-//! - Amount: a number with a currency code, word or sign (`10 USDC`, `$5`, `20 dollars`); a
+//! - Amount: a number with a currency code (USDC, EURC, USD, EUR, GBP), word or sign (`10 USDC`,
+//!   `$5`, `20 dollars`); a
 //!   comparison word before a number (`at most 50`, `more than 3`, `exceeds 100`); a percentage;
 //!   a determiner or qualifier before `amount` (`the amount`, `exact amount`, `invoiced amount`).
-//! - Address: a Stellar account or contract key; a determiner or qualifier directly before
+//! - Address: a long account key (50 or more base32 capitals, or `0x` and 40 or more hex digits);
+//!   a determiner or qualifier directly before
 //!   `address` (`the address`, `listed address`, `vendor's address`), except the verb after a
 //!   demonstrative, as in `does this address the vault`.
 //! - Price: a qualifier before `price` (`the price`, `listed price`, `share price`); `exchange
@@ -91,7 +93,7 @@ fn patterns() -> &'static [(Detail, Regex)] {
         let list: Vec<(Detail, String)> = vec![
             (
                 Detail::Amount,
-                r"\d[\d,]*(?:\.\d+)?\s*(?:usdc|eurc|xlm|usd|eur|gbp|dollars?|euros?|cents?)\b"
+                r"\d[\d,]*(?:\.\d+)?\s*(?:usdc|eurc|usd|eur|gbp|dollars?|euros?|cents?)\b"
                     .into(),
             ),
             (Detail::Amount, r"[$€£]\s?\d".into()),
@@ -105,7 +107,10 @@ fn patterns() -> &'static [(Detail, Regex)] {
                 Detail::Amount,
                 format!(r"\b(?:{qualifier}|in the)\s+(?:payment\s+)?amounts?\b"),
             ),
-            (Detail::Address, r"\b[GC][A-Z2-7]{55}\b".into()),
+            (
+                Detail::Address,
+                r"\b[A-Z2-7]{50,}\b|\b0x[0-9a-fA-F]{40,}\b".into(),
+            ),
             (
                 Detail::Address,
                 format!(r"\b({qualifier})\s+address(?:es)?\b(?:\s+(\w+))?"),
@@ -304,12 +309,12 @@ mod tests {
                 &[(Address, "the address"), (Date, "within the last 30 days")],
             ),
             (
-                "Is this payment for research data and at most 10 USDC, to GBHVEP577HAFD2X3OFL3KA3GANBQZHOMA3S5KJBREAF3K7ZVLJWS6V4Q, before December 1?",
+                "Is this payment for research data and at most 10 USDC, to ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWX, before December 1?",
                 &[
                     (Amount, "10 USDC"),
                     (
                         Address,
-                        "GBHVEP577HAFD2X3OFL3KA3GANBQZHOMA3S5KJBREAF3K7ZVLJWS6V4Q",
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWX",
                     ),
                     (Date, "before December"),
                 ],
@@ -380,7 +385,7 @@ pub fn execute(ctx: &AllowitContext) -> allowit::Result {
             ("Is the fee under 2 percent?", Amount),
             ("Is it the exact amount of the invoice?", Amount),
             (
-                "Is the payee CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75?",
+                "Is the payee 0xab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12?",
                 Address,
             ),
             ("Is it sent to the wallet address of Ana?", Address),
