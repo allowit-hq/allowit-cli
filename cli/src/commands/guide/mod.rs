@@ -52,7 +52,6 @@ mod tests {
             "allowit POLICY_ID help",
             "allowit rail use example:testnet",
             "allowit keys generate agent",
-            "allowit rail trust ORIGIN KEY",
             "allowit wallet import --policy POLICY_ID",
             "allowit exec --op transfer",
             "allowit status ID --wait 60s",

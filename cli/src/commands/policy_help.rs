@@ -1,21 +1,30 @@
 //! `allowit POLICY_ID help`: what the agent of one policy does next.
 //!
 //! The owner copies one line from the app. It holds the policy id and nothing
-//! else. This command reads the public facts of that policy from the server
-//! and prints the agent's next commands in order, with every value filled in.
-//! It changes nothing: it pins no server key and imports no profile. The
-//! server key that it prints is the server's own claim; the owner compares it
-//! with the key that the app shows before the agent runs `rail trust`.
+//! else. The id is a pointer, not a credential: by the id alone the server
+//! answers only the public facts that an agent needs before it proves its key
+//! (state, network and endpoint, wallet kind, server key). This command reads
+//! them, then asks as the policy's agent with each local key of the rail, the
+//! selected one first, until the server admits one: only the agent reads its
+//! wallet, limits and profile. It prints the agent's next commands in order,
+//! with every value filled in. It changes nothing: it pins no server key and
+//! imports no profile. The server key that it prints is the server's own claim;
+//! the owner compares it with the key that the app shows, and `wallet import`
+//! pins it.
 use crate::{
+    agent_read,
     ctx::Ctx,
     error::{Error, Result},
     rails::address,
-    routing,
+    routing::{self, RailInfo},
     settings::keys,
 };
-use allowit_sdk::transport::{
-    http::{HttpClient, Method, Request},
-    rpc::Options,
+use allowit_sdk::{
+    transport::{
+        http::{HttpClient, Method, Request},
+        rpc::Options,
+    },
+    wallet::LocalSigner,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -29,11 +38,15 @@ pub(crate) struct Args {
     pub id: String,
 }
 
-/// The server's answer to `GET /api/agent/policy?id=POLICY_ID`. Unknown
+/// The server's answer to `GET /api/agent/policy?id=POLICY_ID`, the public
+/// facts, or to the agent's signed `POST /api/agent/policy`, which adds the
+/// agent key, the wallet, the limits, the profile and the credits. Unknown
 /// fields are ignored, so a later server can add facts.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Facts {
+    #[serde(default)]
+    pub policy_id: Option<String>,
     pub state: String,
     pub network: String,
     #[serde(default)]
@@ -116,6 +129,36 @@ fn invalid() -> Error {
     Error::uncertain("The server returned invalid policy facts")
 }
 
+/// The server at `origin` did not answer.
+fn unavailable(origin: &str, status: Option<u16>) -> Error {
+    let mut error = Error::uncertain(format!(
+        "The Allowit server at {origin} did not answer; check ALLOWIT_URL and retry"
+    ));
+    error.code = allowit_sdk::transport_failure::NETWORK_UNAVAILABLE;
+    error.status = status;
+    error
+}
+
+/// The refusal of a policy id that the server at `origin` does not hold. A server of an
+/// earlier release has no such route; both answer 404.
+fn unknown(origin: &str, body: &[u8], route: &str) -> Error {
+    let typed = serde_json::from_slice::<Value>(body)
+        .ok()
+        .is_some_and(|body| body["code"] == "policy_unknown");
+    if typed {
+        Error::refused(
+            404,
+            "policy_unknown",
+            format!("{origin} has no policy with this id; copy the line from the app again"),
+        )
+    } else {
+        Error::api(
+            404,
+            format!("{origin} does not serve {route}; check ALLOWIT_URL"),
+        )
+    }
+}
+
 /// Reads the public facts of `id` from the `ALLOWIT_URL` server. The request
 /// carries no credential. Every value that the command prints is checked.
 pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
@@ -135,14 +178,6 @@ pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
     .map_err(|_| Error::config("Cannot configure the server request"))?;
     crate::flush_stderr(&mut cx.out.stderr);
     allowit_sdk::progress::report("Reading the policy from the Allowit server");
-    let unavailable = |status: Option<u16>| {
-        let mut error = Error::uncertain(format!(
-            "The Allowit server at {origin} did not answer; check ALLOWIT_URL and retry"
-        ));
-        error.code = allowit_sdk::transport_failure::NETWORK_UNAVAILABLE;
-        error.status = status;
-        error
-    };
     let response = client
         .send_refusal_body(
             Request {
@@ -153,41 +188,117 @@ pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
             },
             None,
         )
-        .map_err(|_| unavailable(None))?;
+        .map_err(|_| unavailable(&origin, None))?;
     match response.status {
         200..300 => {}
-        404 => {
-            // A server of an earlier release has no such route; both answer 404.
-            let typed = serde_json::from_slice::<Value>(&response.body)
-                .ok()
-                .is_some_and(|body| body["code"] == "policy_unknown");
-            return Err(if typed {
-                Error::refused(
-                    404,
-                    "policy_unknown",
-                    format!(
-                        "{origin} has no policy with this id; copy the line from the app again"
-                    ),
-                )
-            } else {
-                Error::api(
-                    404,
-                    format!("{origin} does not serve policy help; check ALLOWIT_URL"),
-                )
-            });
-        }
-        503 => return Err(unavailable(Some(503))),
+        404 => return Err(unknown(&origin, &response.body, "policy help")),
+        503 => return Err(unavailable(&origin, Some(503))),
         status if status >= 500 => {
             return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
         }
         status => return Err(Error::api(status, "The policy request was refused")),
     }
     let facts: Facts = serde_json::from_slice(&response.body).map_err(|_| invalid())?;
+    if facts.policy_id.as_deref().is_some_and(|named| named != id) {
+        return Err(invalid());
+    }
     Ok((origin, facts))
 }
 
+/// The facts of `id` that the server at `origin` answers to the policy's agent, read with the
+/// request proof of `signer`. `None` when the server refuses the key as not the policy's agent
+/// key: such a key reads nothing more than the public facts.
+pub(crate) fn read_as_agent(origin: &str, id: &str, signer: &LocalSigner) -> Result<Option<Facts>> {
+    let (status, body) = agent_read::post(
+        origin,
+        agent_read::POLICY_PATH,
+        &json!({ "policyId": id }),
+        signer,
+        agent_read::Limits {
+            timeout: Duration::from_secs(20),
+            connect: Duration::from_secs(10),
+            max_bytes: 1 << 20,
+        },
+    )
+    .map_err(|_| unavailable(origin, None))?;
+    match status {
+        200..300 => {}
+        _ if agent_read::not_the_agent(status, &body) => return Ok(None),
+        401 => {
+            return Err(Error::refused(
+                401,
+                "request_proof_refused",
+                format!(
+                    "{origin} refused the signature of key {}; check that this device's clock is right, then run the command again",
+                    signer.address()
+                ),
+            ));
+        }
+        404 => return Err(unknown(origin, &body, "the agent's policy read")),
+        // A server of an earlier release reads the policy with GET only.
+        405 => {
+            return Err(Error::api(
+                405,
+                format!("{origin} does not serve the agent's policy read; check ALLOWIT_URL"),
+            ));
+        }
+        503 => return Err(unavailable(origin, Some(503))),
+        status if status >= 500 => {
+            return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
+        }
+        status => return Err(Error::api(status, "The policy request was refused")),
+    }
+    let facts: Facts = serde_json::from_slice(&body).map_err(|_| invalid())?;
+    if facts.policy_id.as_deref() != Some(id)
+        || facts.agent_public_key.as_deref() != Some(signer.address())
+    {
+        return Err(invalid());
+    }
+    Ok(Some(facts))
+}
+
+/// The most local keys that the help tries as the policy's agent.
+const MAX_AGENT_KEYS: usize = 8;
+
+/// What the search for the local agent key of a policy found.
+enum LocalAgent {
+    /// The local key that the server admits as the policy's agent, with its facts.
+    Found(String, Box<Facts>),
+    /// The server admits none of the local keys of the rail.
+    None,
+    /// The server admits none of the keys that the search tried, and more keys were left.
+    Untried,
+}
+
+/// The local key of `rail` that is the agent key of policy `id`, with the facts that only the
+/// agent reads. The rail's selected agent key goes first, then each other local key of the
+/// rail; the first key that the server admits ends the search. At most [`MAX_AGENT_KEYS`] keys
+/// are tried; a search that leaves keys untried says so.
+fn local_agent(cx: &mut Ctx, rail: &RailInfo, origin: &str, id: &str) -> Result<LocalAgent> {
+    let dir = cx.dir()?;
+    let selected = cx.settings()?.rail(rail.id).agent;
+    let mut candidates: Vec<keys::Key> = keys::list(&dir)?
+        .0
+        .into_iter()
+        .filter(|key| key.secret && key.check_rail(rail.id).is_ok())
+        .collect();
+    candidates.sort_by_key(|key| Some(&key.name) != selected.as_ref());
+    let untried = candidates.len() > MAX_AGENT_KEYS;
+    for key in candidates.into_iter().take(MAX_AGENT_KEYS) {
+        let signer = allowit_sdk::wallet::local_signer(rail.id, &keys::signer_path(&dir, &key)?)?;
+        if let Some(facts) = read_as_agent(origin, id, &signer)? {
+            return Ok(LocalAgent::Found(key.name, Box::new(facts)));
+        }
+    }
+    Ok(if untried {
+        LocalAgent::Untried
+    } else {
+        LocalAgent::None
+    })
+}
+
 /// The server key that this command prints is the server's own claim. Text and JSON output
-/// both carry this sentence before the `rail trust` command.
+/// both carry this sentence before the setup commands; `wallet import` pins the key.
 const SERVER_KEY_CHECK: &str =
     "The owner sees the server key in the app under Agent access. If the two differ, stop.";
 
@@ -209,16 +320,39 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             facts.network.chars().take(64).collect::<String>()
         ))
     })?;
-    let check_account = |key: &Option<String>| -> Result<Option<String>> {
-        key.as_ref()
-            .map(|key| {
-                address::check_account(rail.family, key).map_err(|_| invalid())?;
-                shell_safe(key, 128)
-            })
-            .transpose()
+    let state = match facts.state.as_str() {
+        "awaiting_agent_key" | "draft" | "active" | "inactive" => facts.state.clone(),
+        _ => return Err(invalid()),
     };
-    let server_key = check_account(&facts.server_public_key)?;
-    let agent_key = check_account(&facts.agent_public_key)?;
+    let state = state.as_str();
+    // Only the policy's agent reads its key, wallet, limits and profile. A device that holds
+    // no local key that the server admits as the agent reads the public facts only.
+    let (local, mine, untried) = match state {
+        "draft" | "active" => match local_agent(cx, rail, &origin, &args.id)? {
+            LocalAgent::Found(name, mine) => (Some(name), Some(*mine), false),
+            LocalAgent::None => (None, None, false),
+            LocalAgent::Untried => (None, None, true),
+        },
+        _ => (None, None, false),
+    };
+    // The agent's answer holds the public facts too, and they must be the same.
+    if let Some(mine) = &mine
+        && (mine.state != facts.state
+            || mine.network != facts.network
+            || mine.server_public_key != facts.server_public_key)
+    {
+        return Err(invalid());
+    }
+    let mine = mine.as_ref();
+    let check_account = |key: Option<&String>| -> Result<Option<String>> {
+        key.map(|key| {
+            address::check_account(rail.family, key).map_err(|_| invalid())?;
+            shell_safe(key, 128)
+        })
+        .transpose()
+    };
+    let server_key = check_account(facts.server_public_key.as_ref())?;
+    let agent_key = check_account(mine.and_then(|mine| mine.agent_public_key.as_ref()))?;
     let endpoint = facts
         .endpoint
         .as_ref()
@@ -236,9 +370,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             Ok(endpoint.clone())
         })
         .transpose()?;
-    let wallet = facts
-        .wallet
-        .as_ref()
+    let wallet = mine
+        .and_then(|mine| mine.wallet.as_ref())
         .map(|wallet| {
             address::check_wallet(rail.family, wallet).map_err(|_| invalid())?;
             shell_safe(wallet, 128)
@@ -249,13 +382,13 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         .as_ref()
         .map(|kind| shell_safe(kind, 32))
         .transpose()?;
-    let symbol = facts
-        .asset_symbol
-        .as_ref()
+    let symbol = mine
+        .and_then(|mine| mine.asset_symbol.as_ref())
         .map(|symbol| shell_safe(symbol, 16))
         .transpose()?;
-    let limits = facts
-        .limits
+    let limits = mine
+        .map(|mine| mine.limits.as_slice())
+        .unwrap_or_default()
         .iter()
         .take(64)
         .map(|limit| {
@@ -266,15 +399,9 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    let state = match facts.state.as_str() {
-        "awaiting_agent_key" | "draft" | "active" | "inactive" => facts.state.as_str(),
-        _ => return Err(invalid()),
-    };
-    // The price of one evaluation, which the owner pays. A server of an earlier release
-    // sends none.
-    let credits = facts
-        .credits
-        .as_ref()
+    // The price of one evaluation, which the owner pays. Only the policy's agent reads it.
+    let credits = mine
+        .and_then(|mine| mine.credits.as_ref())
         .map(|credits| {
             let plain = crate::credits::Charge::of(&json!({
                 "charged": credits.evaluation, "tariff": credits.tariff, "lines": [],
@@ -293,18 +420,6 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             "Credits: each request that you sign costs the policy owner {evaluation} credits, whatever its outcome, and the model tokens that it uses, in whole credits. You need no credits of your own.{unpaid}"
         )
     });
-    // The local key of this policy's agent, if this device holds it.
-    let local = match &agent_key {
-        Some(agent) => {
-            let dir = cx.dir()?;
-            keys::list(&dir)?
-                .0
-                .into_iter()
-                .find(|key| key.secret && &key.address == agent)
-                .map(|key| key.name)
-        }
-        None => None,
-    };
     // A `--config-dir` flag of this call stays on every printed command: the commands then
     // read and write the directory that holds the key found above. A directory from
     // `ALLOWIT_CONFIG_DIR` stays in the caller's environment.
@@ -396,6 +511,11 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 "{public} Then wait. When the owner has signed, run: {again}"
             ));
         }
+        "draft" | "active" if untried => {
+            next = Some(format!(
+                "This device holds more than {MAX_AGENT_KEYS} keys of this rail, and none that was tried is the agent key of this policy. Select the key that you gave the owner (`{cli} keys use NAME`), then run: {again}"
+            ));
+        }
         "draft" => {
             next = Some(match &local {
                 Some(name) => format!(
@@ -406,80 +526,75 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 ),
             });
         }
-        "active" => {
-            let (Some(wallet), Some(server_key), Some(agent)) = (&wallet, &server_key, &agent_key)
-            else {
-                return Err(invalid());
-            };
-            if facts.profile.is_none() {
-                return Err(invalid());
-            }
-            match &local {
-                None => {
-                    next = Some(format!(
-                        "No local key has the agent public key {agent} of this policy, so this device cannot pay. Tell the owner your public key (`{cli} keys show NAME`) and stop."
-                    ));
+        "active" => match (&local, mine) {
+            (Some(name), Some(mine)) => {
+                let (Some(wallet), Some(_), Some(_)) = (&wallet, &server_key, &agent_key) else {
+                    return Err(invalid());
+                };
+                if mine.profile.is_none() {
+                    return Err(invalid());
                 }
-                Some(name) => {
-                    steps.push(Step {
-                        title: "Set up once, in this order",
-                        note: endpoint_note,
-                        commands: vec![
-                            select,
-                            format!("{cli} rail trust {} {server_key}", shell_quote(&origin)),
-                            format!("{cli} keys use {name}"),
-                            // The attached form: an id can start with a hyphen.
-                            with_url(&format!("{cli} wallet import --policy={}", args.id)),
-                            format!("{cli} wallet use {wallet}"),
-                        ],
-                    });
-                    // The amount syntax of the installed asset: an issued asset names its
-                    // issuer, so the example pays the policy's own asset.
-                    let issuer = facts
-                        .profile
-                        .as_ref()
-                        .and_then(|profile| profile["config"]["assetIssuer"].as_str())
-                        .filter(|issuer| address::check_account(rail.family, issuer).is_ok())
-                        .and_then(|issuer| shell_safe(issuer, 128).ok());
-                    let symbol = match (symbol.as_deref(), issuer) {
-                        (Some(symbol), Some(issuer)) => format!("{symbol}:{issuer}"),
-                        (Some(symbol), None) => symbol.to_owned(),
-                        (None, _) => "ASSET".to_owned(),
-                    };
-                    // The first allowed destination of the policy, when it lists them.
-                    let destination = facts
-                        .profile
-                        .as_ref()
-                        .and_then(|profile| {
-                            profile["portable"]["params"]["destinations"]["List"][0]["Addr"]
-                                .as_str()
-                        })
-                        .filter(|to| address::check_account(rail.family, to).is_ok())
-                        .and_then(|to| shell_safe(to, 128).ok())
-                        .unwrap_or_else(|| "DESTINATION".into());
-                    // `--wallet` or `ALLOWIT_WALLET` of this call outranks the wallet that
-                    // `wallet use` saves. When it names another wallet, the payment names the
-                    // policy wallet.
-                    let pay = match &cx.global.wallet {
-                        Some(named) if named != wallet => format!("{cli} --wallet {wallet}"),
-                        _ => cli.clone(),
-                    };
-                    examples = vec![
-                        (
-                            "pay",
-                            with_url(&format!(
-                                "{pay} exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
-                            )),
-                        ),
-                        (
-                            "status",
-                            with_url(&format!("{cli} status pay-0001 --wait 60s")),
-                        ),
-                        ("history", format!("{cli} history")),
-                    ];
-                }
+                steps.push(Step {
+                    title: "Set up once, in this order",
+                    note: endpoint_note,
+                    commands: vec![
+                        select,
+                        format!("{cli} keys use {name}"),
+                        // The attached form: an id can start with a hyphen.
+                        with_url(&format!("{cli} wallet import --policy={}", args.id)),
+                        format!("{cli} wallet use {wallet}"),
+                    ],
+                });
+                // The amount syntax of the installed asset: an issued asset names its
+                // issuer, so the example pays the policy's own asset.
+                let issuer = mine
+                    .profile
+                    .as_ref()
+                    .and_then(|profile| profile["config"]["assetIssuer"].as_str())
+                    .filter(|issuer| address::check_account(rail.family, issuer).is_ok())
+                    .and_then(|issuer| shell_safe(issuer, 128).ok());
+                let symbol = match (symbol.as_deref(), issuer) {
+                    (Some(symbol), Some(issuer)) => format!("{symbol}:{issuer}"),
+                    (Some(symbol), None) => symbol.to_owned(),
+                    (None, _) => "ASSET".to_owned(),
+                };
+                // The first allowed destination of the policy, when it lists them.
+                let destination = mine
+                    .profile
+                    .as_ref()
+                    .and_then(|profile| {
+                        profile["portable"]["params"]["destinations"]["List"][0]["Addr"].as_str()
+                    })
+                    .filter(|to| address::check_account(rail.family, to).is_ok())
+                    .and_then(|to| shell_safe(to, 128).ok())
+                    .unwrap_or_else(|| "DESTINATION".into());
+                // `--wallet` or `ALLOWIT_WALLET` of this call outranks the wallet that
+                // `wallet use` saves. When it names another wallet, the payment names the
+                // policy wallet.
+                let pay = match &cx.global.wallet {
+                    Some(named) if named != wallet => format!("{cli} --wallet {wallet}"),
+                    _ => cli.clone(),
+                };
+                examples = vec![
+                    (
+                        "pay",
+                        with_url(&format!(
+                            "{pay} exec --op transfer --to {destination} --amount {symbol}:AMOUNT --request-id pay-0001"
+                        )),
+                    ),
+                    (
+                        "status",
+                        with_url(&format!("{cli} status pay-0001 --wait 60s")),
+                    ),
+                    ("history", format!("{cli} history")),
+                ];
             }
-        }
+            _ => {
+                next = Some(format!(
+                    "No local key is the agent key of this policy, so this device cannot pay. Tell the owner your public key (`{cli} keys show NAME`) and stop."
+                ));
+            }
+        },
         _ => {
             next = Some(
                 "This policy is not active. The owner stopped it or has not finished it. Ask the owner."

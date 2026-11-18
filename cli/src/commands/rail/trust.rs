@@ -1,4 +1,6 @@
-//! Explicit public backend trust. No discovery response can install a pin.
+//! Explicit public backend trust. Besides this command, only `wallet import --policy` pins a
+//! key: the server key of the policy's public answer, for a server that has no pin yet. No
+//! server answer replaces a pin.
 use crate::{ctx::Ctx, error::Result};
 /// Configure an independently verified public server identity for the selected rail
 #[derive(clap::Args, Debug)]

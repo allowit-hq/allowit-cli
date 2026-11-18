@@ -180,10 +180,11 @@ fn an_unset_server_url_is_the_production_server_and_an_untrusted_server_has_its_
         sandbox.set("ALLOWIT_URL", &mock.url);
         let output = sandbox.run(&status);
         assert_eq!(code(&output), Some(3), "{}", stderr(&output));
+        let id = profile["policyId"].as_str().unwrap();
         assert_eq!(
             stderr(&output),
             format!(
-                "error: no trusted server key for {url} on {net}; run allowit rail trust {url} PUBLIC_KEY\n",
+                "error: no trusted server key for {url} on {net}; run allowit wallet import --policy={id}, or allowit rail trust {url} PUBLIC_KEY\n",
                 url = mock.url
             )
         );

@@ -41,7 +41,8 @@ and one `SHA256SUMS` file.
 ## Agent start: `allowit POLICY_ID help`
 
 The app gives the owner one line for the agent: an install URL and `allowit POLICY_ID help`.
-The command reads the public facts of that policy from the server and prints the agent's next commands in order,
+The command reads the public facts of that policy from the server, then asks as the policy's agent with each local
+key of the rail, the selected key first, and prints the agent's next commands in order,
 with the real values. `--json` prints the same as data.
 
 ```sh
@@ -53,18 +54,27 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | --- | --- |
 | `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`; then report the public key to the owner and run the command again |
 | `draft` | The owner has the key and has not signed: wait and run the command again |
-| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `rail trust ORIGIN KEY`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the limits in the asset's unit |
+| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
 Its first rule is that the agent pays only when the owner asks: setting up is not a request, and the printed
-payment is an example. The command changes nothing. It pins no server key and imports no profile: the printed key is the server's own
-claim, and the owner compares it with the key that the app shows under Agent access before the agent runs
-`rail trust`. A device that holds no key for the policy's agent public key gets no setup and no payment command.
-Every server value that enters a printed command is checked: an address of the rail, or a plain URL without a
-character that a shell interprets. The command exits 4 with `policy_unknown` for an id that the server does not
-have, and 7 when the server does not answer.
-`wallet import --policy POLICY_ID` reads the same public profile from the server and verifies it as a file import
-does: against the pinned server key and the rail's own endpoint. `rail use RAIL --rpc-url URL` keeps the endpoint
+payment is an example. The command changes nothing: it pins no server key and imports no profile.
+
+A policy id is a pointer, not a credential. By the id alone the server answers only what an agent needs before it
+proves its key: the state, the network and its endpoint, the wallet kind and the server key. The agent key, the
+wallet, the limits, the destinations, the profile and the credits need the agent's request proof, the bearer that
+`native/limits` takes: the help and `wallet import` sign `POST /api/agent/policy` with the local key. A device
+whose keys the server does not admit as the policy's agent gets no setup and no payment command. Every server value
+that enters a printed command is checked: an address of the rail, or a plain URL without a character that a shell
+interprets. The command exits 4 with `policy_unknown` for an id that the server does not have, and 7 when the server
+does not answer.
+
+`wallet import --policy POLICY_ID` reads the policy's profile with the selected agent key and verifies it as a file
+import does: against the server key and the rail's own endpoint. The server key comes from the public answer, which
+the owner compares with the key that the app shows. The import pins it for that server when the server has no pin
+yet. A pinned key differs from the answer: the import stops with `server_key_differs`. Only `rail trust` changes a
+pin.
+`rail use RAIL --rpc-url URL` keeps the endpoint
 for that rail, so later commands need no flag.
 [`skills/allowit/SKILL.md`](skills/allowit/SKILL.md) is the agent skill for the whole journey; `allowit guide`
 prints it.
@@ -164,7 +174,9 @@ Public keys added with `keys add` cannot sign. `keys export` explicitly prints p
 Select a rail from `allowit rail ls --json` before configuring its backend identity.
 Obtain the public identity through an independent trusted channel.
 For a local server, derive it from the actual configured server signer through the launch setup.
-A public profile or an unauthenticated discovery response cannot install its own trust anchor.
+A public profile cannot install its own trust anchor. `wallet import --policy` pins the server key of the policy's
+public answer for a server without a pin (trust on first use; the owner compares the key with the app). No server
+answer replaces a pin.
 
 ```sh
 allowit rail use RAIL
@@ -174,7 +186,27 @@ allowit rail trust SERVER_ORIGIN PUBLIC_KEY
 The command stores the public identity by rail and origin in `config.toml`, under `server_authorities`.
 Repeating the same pin does not change the configuration. It does not create a key or change agent or wallet selection.
 The origin must match `ALLOWIT_URL`. Credentials, paths, queries and fragments are not origins.
-Imports and owner actions require this independent pin. Fresh execution retains that authority and one exact profile through journaling and signing.
+Imports and owner actions require this pin. Fresh execution retains that authority and one exact profile through journaling and signing.
+
+### Checks before the agent signs
+
+Before the agent key signs a fresh operation, `exec`, `call` and the MCP payment tool check, and refuse with exit 4
+and a plain message when a check fails. Nothing is signed then.
+
+| Check | Refusal |
+| --- | --- |
+| The profile's server key, which co-signs every operation, is the key pinned for its server | `server_key_differs` |
+| The server admits the key as the policy's agent | `not_policy_agent` |
+| The policy is active | `policy_not_active` |
+| The server names the pinned server key for the policy | `server_key_differs` |
+| The policy names the wallet of the profile | `wallet_differs` |
+| The ledger holds the wallet as the profile names it, read through the rail's RPC endpoint as an import is checked | `wallet_unverified` |
+
+The ledger check depends on the wallet kind. A Native wallet is an account that the owner owns; its agent has a key
+and no account of its own. The account must exist with the owner, the agent key and the server key as its signers
+at the policy's weights, and the owner's approval of the source must hold. A contract wallet (Simple, Standard,
+Custom) is a contract; its agent has no account and no signer seat, and the contract checks the agent's signature
+itself. The contract must exist, be unpaused and name this owner, agent key, server key and policy.
 
 ## Generate an owner policy
 
@@ -350,7 +382,7 @@ Output is text, also when piped. Only `--json` selects JSON. `NO_DNA` disables p
 The owner of a policy pays for compute, whatever the outcome. Each request that the agent signs costs the owner one credit: allowed, denied or held for the owner. The model tokens that the request used and the fees that Allowit paid for it are added: a web search's search fee, and the network fee when Allowit's facilitator settles the payment. The sum is rounded down once, to a whole credit. The agent holds no credits and needs none.
 
 - `allowit POLICY_ID help` prints what one request costs the owner, and says when the owner has no credits left.
-- The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each item and the price list version. A call that is priced by its tokens shows what it used (`decision api 0.24 used`), a fee shows its cost and, for a network fee, the amount and rate (`network fee 0.156156 (0.0011154 <asset> at USD 0.14)`), and `inference` is the whole credits that the request paid for them. A fee that is known only after the payment, such as a settlement's network fee, is a later charge of the same request; `allowit status` shows it. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `GET /api/agent/charge` of the policy's server; a server that does not answer leaves the receipt without the row.
+- The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each item and the price list version. A call that is priced by its tokens shows what it used (`decision api 0.24 used`), a fee shows its cost and, for a network fee, the amount and rate (`network fee 0.156156 (0.0011154 <asset> at USD 0.14)`), and `inference` is the whole credits that the request paid for them. A fee that is known only after the payment, such as a settlement's network fee, is a later charge of the same request; `allowit status` shows it. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `POST /api/agent/charge` of the policy's server, signed with the agent key; a server that does not answer leaves the receipt without the row.
 - A request that Allowit refused after it evaluated it prints the same `credits:` line on stderr, and `error.credits` in JSON: a policy denial (exit 20), a denial of a decision question, a request that waits for its owner, or a failed step. The owner paid for it. A denied request ID keeps its decision: use a new request ID to ask again.
 - A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON.
 
