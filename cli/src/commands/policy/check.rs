@@ -14,6 +14,9 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n
 /// chain: that source is checked with the portable profile, also when it calls a server
 /// function, which the server evaluates before it co-signs. Without --kind, a policy that only
 /// the server profile admits is checked as a keypair wallet's policy.
+///
+/// A decision question that the source states as a literal and that asks an amount, an address,
+/// a price or a date gets a warning: a rule checks such a detail exactly.
 #[derive(clap::Args, Debug)]
 pub(crate) struct Args {
     /// Source file; - reads stdin
@@ -81,6 +84,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         } else {
             allowit_sdk::authoring::compile(&source, &tools)?;
         }
+    }
+    // A question that asks a detail that a rule checks exactly leaves the result unchanged.
+    for warning in super::details::warnings(&source) {
+        cx.out.warning(warning);
     }
     cx.out.value(&serde_json::json!({"sourceHash":allowit_sdk::digest(source.as_bytes()),"profile":if server_profile {"server"} else {"portable"},"placement":if server_profile || !functions.is_empty() {"server"} else {"contract"},"serverFunctions":functions,"prefix":shape.prefix,"canonicalOnly":shape.canonical_only,"writesState":shape.writes_state,"compiled":args.compile}));
     Ok(0)

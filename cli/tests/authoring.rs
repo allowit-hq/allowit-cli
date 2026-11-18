@@ -247,3 +247,68 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         &["mismatched types"],
     );
 }
+
+/// A literal decision question that asks an amount, an address, a price or a date gets a
+/// warning on stderr; the check still passes and its result keeps its shape. A question that a
+/// policy reads from a param is not checked.
+#[test]
+fn check_warns_when_a_question_asks_what_a_rule_checks() {
+    const HEAD: &str = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n";
+    let source = |query: &str| {
+        format!(
+            "{HEAD}    allowit::decision(ctx, &allowit::AllowitDecision {{\n        id: \"purchase\",\n        query: \"{query}\",\n        deny_below: 1000,\n        allow_above: 8500,\n    }})?;\n    Ok(())\n}}\n"
+        )
+    };
+    let sandbox = Sandbox::new("question-details");
+    for (name, query) in [
+        (
+            "amount.rs",
+            "Is this payment for research data and at most 10 USDC?",
+        ),
+        (
+            "refund.rs",
+            "Is this refund for an order paid within the last 30 days, sent to the address that paid for the order?",
+        ),
+        ("plain.rs", "Is this payment for research data?"),
+    ] {
+        std::fs::write(sandbox.work().join(name), source(query)).unwrap();
+    }
+    let output = sandbox.run(&["policy", "check", "amount.rs"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output),
+        "warning: the decision question \"Is this payment for research data and at most 10 USDC?\" asks an amount (\"10 USDC\"); a decision model passes such mismatches, and a rule checks them exactly: for an amount, payment_limit, daily_spending_limit or custom code that compares ctx.request.amount with an amount param. Keep the question on what the payment is for\n"
+    );
+    let output = sandbox.run(&["policy", "check", "refund.rs"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    let warned = stderr(&output);
+    assert!(
+        warned
+            .contains("asks an address (\"the address\") and a date (\"within the last 30 days\")"),
+        "{warned}"
+    );
+    assert!(
+        warned.contains("for an address, destinations with the addresses; for a date, expires_at"),
+        "{warned}"
+    );
+    // JSON mode: the result is unchanged, and the warning is a JSON line on stderr.
+    let checked = sandbox.json(&["policy", "check", "amount.rs"]);
+    assert_eq!(
+        checked["serverFunctions"],
+        serde_json::json!(["allowit::decision"])
+    );
+    assert!(checked.get("warnings").is_none());
+    let output = sandbox.run(&["--json", "policy", "check", "amount.rs"]);
+    let line: serde_json::Value =
+        serde_json::from_str(stderr(&output).lines().next().unwrap()).unwrap();
+    assert!(
+        line["warning"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("asks an amount")
+    );
+    // A question about what the payment is for gets none.
+    let output = sandbox.run(&["policy", "check", "plain.rs"]);
+    assert_eq!(code(&output), Some(0));
+    assert_eq!(stderr(&output), "");
+}
