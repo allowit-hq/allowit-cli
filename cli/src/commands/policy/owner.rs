@@ -6,7 +6,7 @@ use crate::{
 };
 use allowit_sdk::owner as shared;
 use std::path::PathBuf;
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --request-id deploy-0001 --fee-limit 2000000000 --yes";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes";
 #[derive(clap::Args, Debug)]
 pub(crate) struct Session {
     /// Named local owner key, independent of the selected agent key
@@ -37,6 +37,13 @@ pub(crate) struct Deploy {
     /// Total fee ceiling in the selected rail's base units
     #[arg(long)]
     pub fee_limit: String,
+    /// Positive decimal amount of the installed asset that the deployment moves into the wallet
+    #[arg(long)]
+    pub amount: Option<String>,
+    /// Positive decimal amount of the network's fee asset that the deployment moves into a wallet
+    /// of another asset, from which the wallet repays network fees
+    #[arg(long)]
+    pub fee_asset_amount: Option<String>,
 }
 #[derive(clap::Args, Debug)]
 pub(crate) struct Fund {
@@ -96,7 +103,7 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     agent.check_rail(cx.rail()?.id)?;
     let draft = read_input(&a.policy_file)?;
     let executable = read_input(&a.executable)?;
-    cx.confirm("Deploy this exact policy wallet using the owner account")?;
+    cx.confirm("Deploy and fund this exact policy wallet using the owner account")?;
     let network = cx.rail()?.id;
     let out = shared::deploy(
         &local.context(&a.session.origin),
@@ -107,6 +114,8 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
             executable: &executable,
             request_id: &a.session.request_id,
             fee_limit: &a.fee_limit,
+            amount: a.amount.as_deref(),
+            fee_asset_amount: a.fee_asset_amount.as_deref(),
         },
     )?;
     crate::receipt::show_owner(&mut cx.out, network, out);

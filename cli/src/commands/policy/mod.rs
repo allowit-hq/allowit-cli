@@ -1,6 +1,7 @@
 //! Portable source validation, generation, owner workflows and installed-policy inspection.
 mod build;
 mod check;
+mod details;
 mod generate;
 mod kinds;
 mod owner;

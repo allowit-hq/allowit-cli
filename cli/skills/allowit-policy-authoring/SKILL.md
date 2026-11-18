@@ -29,6 +29,7 @@ Caller-provided claims cannot replace trusted state, native authority or verifie
 
 Run `allowit policy check POLICY.rs` to inspect the exact source digest, leading canonical rules and state-write shape.
 This command validates source structure with the profile of the wallet kind that holds the policy. The server's gate checks every policy with the server profile first, so a policy that this profile refuses, such as one over 16000 bytes, is refused for every kind. The server enforces the whole policy of a keypair wallet (`--kind native`) and keeps its params: the check uses the server profile, which admits the server functions and the text of an owner param read with `as_str()`. A contract wallet holds its source on chain: the check uses the portable profile, also for a policy that calls a server function, which the server evaluates before it co-signs; such a policy states its text in the source. `--kind custom` refuses a policy that calls a server function. Without `--kind`, a policy that only the server profile admits is checked as a keypair wallet's policy. The result names the profile, the placement and the server functions that the policy calls. Add `--compile` to also type-check through the pinned Core helper and portable Std library.
+A decision question never judges an amount, an address, a price or a date: a decision model passes such mismatches, and a rule checks them exactly (`payment_limit`, `destinations`, `expires_at` or custom code with `ctx.request.amount` or `ctx.request.now`). The check warns on stderr when a question that the source states as a literal asks one; a question read from a param is not checked. The warning leaves the result unchanged.
 `--compile` requires rustc. Missing tools, compilation failures and runtime limits stop the check.
 `cargo test --locked -p allowit-policy-template` also type-checks the template as ordinary Rust.
 A local build does not authorize publication, signing or spending.
@@ -60,7 +61,7 @@ Read verified native receipts before treating a payment as settled.
 A settled `exec` or `status` result shows the transaction, `height`, `fee` and `explorer` link. Report amounts with the unit that the result prints.
 A limit for each payment has no counter: it prints `-` for spent and remaining, and JSON lists it under `paymentLimits`.
 `wallet show` prints the limits of a wallet before its first payment.
-For the `custom` kind, run `policy build POLICY_ID --owner-key NAME --origin ORIGIN --out wallet.wasm` before `policy deploy`, and pass that file as `--executable`. The build prints the code hash that the owner attests.
+For the `custom` kind, run `policy build POLICY_ID --owner-key NAME --origin ORIGIN --out wallet.wasm` before `policy deploy`, and pass that file as `--executable`. The build hands the code to the server, which uploads it, and prints its code hash. `policy deploy --amount AMOUNT` creates and funds the wallet with one owner signature; a wallet of another asset than XLM also takes `--fee-asset-amount`.
 `policy deploy` and `policy fund` print the hash, ledger, status and explorer link of each owner transaction.
 Record `allowit --version` with a run: it names the git revision that built the binary.
 A typed server refusal prints `error: CODE: MESSAGE`. Report the code; do not retry a refusal with exit 4.
