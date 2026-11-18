@@ -171,24 +171,24 @@ pub(crate) fn authority(
     let origin = profile.server_origin().to_owned();
     let named = crate::config::parse_origin(&cx.server_url()?)?;
     let d = profile.description();
+    let pinned = cx
+        .settings()?
+        .rail(rail.id)
+        .server_authorities
+        .get(&named)
+        .cloned()
+        .ok_or_else(|| {
+            Error::config(format!(
+                "no trusted server key for {named} on {}; run allowit wallet import --policy={}, or allowit rail trust {named} PUBLIC_KEY",
+                rail.id, d.policy_id
+            ))
+        })?;
     if named != origin {
         return Err(Error::config(format!(
             "the policy {} of this wallet is on {origin}, and ALLOWIT_URL names {named}; run the command with ALLOWIT_URL={origin}",
             d.policy_id
         )));
     }
-    let pinned = cx
-        .settings()?
-        .rail(rail.id)
-        .server_authorities
-        .get(&origin)
-        .cloned()
-        .ok_or_else(|| {
-            Error::config(format!(
-                "no trusted server key for {origin} on {}; run allowit wallet import --policy={}",
-                rail.id, d.policy_id
-            ))
-        })?;
     server_key_pinned(d, &origin, &pinned)?;
     ServerAuthority::new(rail.id, &origin, &pinned)
 }

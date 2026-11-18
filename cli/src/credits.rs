@@ -311,10 +311,13 @@ pub(crate) fn explained(code: &str) -> Option<Explained> {
 /// only when it holds one.
 pub(crate) fn charged_denial(error: &Error) -> bool {
     error.code == crate::exit::Exit::Denied.code()
-        || error
-            .api_code
-            .as_deref()
-            .is_some_and(|code| !matches!(code, EXHAUSTED | RUNNING | UNAVAILABLE))
+        // A refusal of the server: a check of this CLI before signing has no status and was
+        // never evaluated.
+        || (error.status.is_some()
+            && error
+                .api_code
+                .as_deref()
+                .is_some_and(|code| !matches!(code, EXHAUSTED | RUNNING | UNAVAILABLE)))
 }
 
 #[cfg(test)]
@@ -459,6 +462,11 @@ mod tests {
             );
         }
         assert!(!charged_denial(&Error::uncertain("no answer")));
+        // A check of this CLI before signing: typed, with no server status, never evaluated.
+        let mut local = Error::config("Nothing was signed.");
+        local.code = 4;
+        local.api_code = Some("server_key_differs".into());
+        assert!(!charged_denial(&local));
     }
 
     #[test]

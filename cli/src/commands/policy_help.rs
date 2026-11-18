@@ -288,7 +288,8 @@ fn local_agent(
 
 /// The server key that this command prints is the server's own claim. Text and JSON output
 /// both carry this sentence before the setup commands; `wallet import` pins the key.
-const SERVER_KEY_CHECK: &str = "The owner sees the server key in the app under Agent access. If the two differ, stop. wallet import pins it.";
+const SERVER_KEY_CHECK: &str =
+    "The owner sees the server key in the app under Agent access. If the two differ, stop.";
 
 /// One step: a title and its commands.
 struct Step {
