@@ -307,6 +307,22 @@ fn check_warns_when_a_question_asks_what_a_rule_checks() {
             .unwrap()
             .contains("asks an amount")
     );
+    // A raw string literal is a literal too.
+    std::fs::write(
+        sandbox.work().join("raw.rs"),
+        source("Q").replace(
+            "\"Q\"",
+            "r#\"Is this payment for \"research\" data and at most 10 USDC?\"#",
+        ),
+    )
+    .unwrap();
+    let output = sandbox.run(&["policy", "check", "raw.rs"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output).starts_with("warning: the decision question \"Is this payment for \"research\" data and at most 10 USDC?\" asks an amount (\"10 USDC\")"),
+        "{}",
+        stderr(&output)
+    );
     // A question about what the payment is for gets none.
     let output = sandbox.run(&["policy", "check", "plain.rs"]);
     assert_eq!(code(&output), Some(0));

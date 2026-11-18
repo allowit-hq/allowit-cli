@@ -190,20 +190,67 @@ pub(crate) fn classify(question: &str) -> Vec<Found> {
     found
 }
 
+/// The text of the Rust string literal at the start of `text`: an ordinary literal with its
+/// escapes, or a raw literal such as `r#"..."#`. `None` for anything else, such as a variable.
+fn string_literal(text: &str) -> Option<String> {
+    if let Some(rest) = text.strip_prefix('r') {
+        let hashes = rest.bytes().take_while(|b| *b == b'#').count();
+        let body = rest[hashes..].strip_prefix('"')?;
+        let close = format!("\"{}", "#".repeat(hashes));
+        return body.find(&close).map(|end| body[..end].to_owned());
+    }
+    let mut chars = text.strip_prefix('"')?.chars().peekable();
+    let mut out = String::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '\'' => out.push('\''),
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'r' => out.push('\r'),
+                '0' => out.push('\0'),
+                'x' => {
+                    let hex: String = chars.by_ref().take(2).collect();
+                    let code = u8::from_str_radix(&hex, 16)
+                        .ok()
+                        .filter(|code| *code < 0x80)?;
+                    out.push(char::from(code));
+                }
+                'u' => {
+                    if chars.next()? != '{' {
+                        return None;
+                    }
+                    let hex: String = chars.by_ref().take_while(|c| *c != '}').collect();
+                    out.push(char::from_u32(
+                        u32::from_str_radix(&hex.replace('_', ""), 16).ok()?,
+                    )?);
+                }
+                // A line continuation skips the line break and the leading whitespace.
+                '\n' => while chars.next_if(|c| c.is_whitespace()).is_some() {},
+                _ => return None,
+            },
+            c => out.push(c),
+        }
+    }
+    None
+}
+
 /// The literal questions of `source`: the `query` of each `AllowitDecision` and
-/// `AllowitRequestScreening` that states it as a string literal.
+/// `AllowitRequestScreening` that states it as a string literal, ordinary or raw.
 pub(crate) fn questions(source: &str) -> Vec<String> {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     let pattern = PATTERN.get_or_init(|| {
-        Regex::new(
-            r#"Allowit(?:Decision|RequestScreening)\s*\{[^{}]*?\bquery\s*:\s*"((?:[^"\\]|\\.)*)""#,
-        )
-        .expect("the literal question pattern is valid")
+        Regex::new(r"Allowit(?:Decision|RequestScreening)\s*\{[^{}]*?\bquery\s*:\s*")
+            .expect("the literal question pattern is valid")
     });
     let mut found: Vec<String> = Vec::new();
-    for capture in pattern.captures_iter(source) {
-        let text = capture[1].replace("\\\"", "\"").replace("\\\\", "\\");
-        if !found.contains(&text) {
+    for start in pattern.find_iter(source) {
+        if let Some(text) = string_literal(&source[start.end()..])
+            && !found.contains(&text)
+        {
             found.push(text);
         }
     }
@@ -290,6 +337,34 @@ mod tests {
                 .collect();
             assert_eq!(details(question), expected, "{question}");
         }
+    }
+
+    #[test]
+    fn a_question_is_read_from_an_ordinary_or_a_raw_literal() {
+        let source = r##"
+            allowit::decision(ctx, &allowit::AllowitDecision { id: "a", query: r#"Is this "research" at most 10 USDC?"#, deny_below: 1, allow_above: 2 })?;
+            allowit::decision(ctx, &AllowitDecision { id: "b", query: r"Is it overdue?", deny_below: 1, allow_above: 2 })?;
+            allowit::decision(ctx, &AllowitDecision { id: "c", query: "Is it \u{41}PI data at \x24 5?", deny_below: 1, allow_above: 2 })?;
+            allowit::decision(ctx, &AllowitDecision { id: "d", query: "Is this \
+                research data?", deny_below: 1, allow_above: 2 })?;
+            allowit::decision(ctx, &AllowitDecision { id: "e", query: question.as_str(), deny_below: 1, allow_above: 2 })?;
+            allowit::decision(ctx, &AllowitDecision { id: "f", query: "Bad \q escape", deny_below: 1, allow_above: 2 })?;
+        "##;
+        assert_eq!(
+            questions(source),
+            [
+                "Is this \"research\" at most 10 USDC?",
+                "Is it overdue?",
+                "Is it API data at $ 5?",
+                "Is this research data?",
+            ]
+        );
+        assert_eq!(
+            string_literal(r###"r##"a"#b"##, rest"###).as_deref(),
+            Some("a\"#b")
+        );
+        assert_eq!(string_literal(r#""unterminated"#), None);
+        assert_eq!(string_literal("r#\"open"), None);
     }
 
     #[test]
