@@ -28,6 +28,7 @@ fn answer(
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn exec_checks_the_server_key_and_the_policy_before_the_agent_signs() {
     each_rail(Feature::Transfer, |rail| {
         let net = rail.network;

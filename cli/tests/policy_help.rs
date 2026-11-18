@@ -106,6 +106,7 @@ fn facts(net: &str, state: &str) -> Value {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
     every_rail(|rail| {
         let net = rail.network;
@@ -204,6 +205,7 @@ fn sandbox_url(sandbox: &Sandbox) -> String {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
     every_rail(|rail| {
         let net = rail.network;
@@ -503,6 +505,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
 /// The help says what one request costs the policy owner in credits and that the agent needs
 /// none. When the owner cannot pay, it says what the refusal will be.
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn the_help_shows_the_credits_that_each_request_costs_the_owner() {
     every_rail(|rail| {
         let net = rail.network;
@@ -577,6 +580,7 @@ fn the_help_shows_the_credits_that_each_request_costs_the_owner() {
 /// A device with more local keys than the help tries says so: it names no missing key and
 /// tells the agent to select the key that it gave the owner.
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_search_that_leaves_keys_untried_says_to_select_the_agent_key() {
     every_rail(|rail| {
         let net = rail.network;
@@ -603,6 +607,7 @@ fn a_search_that_leaves_keys_untried_says_to_select_the_agent_key() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes() {
     every_rail(|rail| {
         let net = rail.network;
@@ -645,6 +650,7 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn rail_use_keeps_the_endpoint_and_wallet_import_reads_the_profile_of_a_policy() {
     every_rail(|rail| {
         let net = rail.network;

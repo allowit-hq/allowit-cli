@@ -86,6 +86,7 @@ fn error(output: &std::process::Output) -> Value {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_build_needs_the_ticket_and_signed_source_hash_or_an_owner_key() {
     let mut sandbox = Sandbox::new("build-usage");
     let mock = Mock::new();
@@ -121,6 +122,7 @@ fn a_build_needs_the_ticket_and_signed_source_hash_or_an_owner_key() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn source_that_the_owner_did_not_sign_stops_the_build_before_it_compiles() {
     each_rail(Feature::CustomBuild, |rail| {
         let mut sandbox = Sandbox::new("build-source");
@@ -156,6 +158,7 @@ fn source_that_the_owner_did_not_sign_stops_the_build_before_it_compiles() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
     each_rail(Feature::CustomBuild, |rail| {
         let source = source();
@@ -199,6 +202,7 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn the_server_key_of_the_command_must_equal_the_pinned_key() {
     each_rail(Feature::CustomBuild, |rail| {
         let (pinned, other) = (server_key(rail, 1), server_key(rail, 3));
@@ -237,6 +241,7 @@ fn the_server_key_of_the_command_must_equal_the_pinned_key() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn an_owner_key_with_the_server_key_of_the_command_needs_no_pinned_key() {
     each_rail(Feature::CustomBuild, |rail| {
         let server = server_key(rail, 1);
