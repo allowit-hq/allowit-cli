@@ -15,6 +15,8 @@ on:
 permissions:
   contents: read
 jobs:
+  # The hermetic tests: no socket, no network. scripts/no-network.sh runs them in a unit that
+  # may create no IP socket, so a test that needs one fails here.
   cli:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -35,6 +37,26 @@ jobs:
           repository: ${{ secrets.PRIVATE_DEPENDENCY_REPOSITORY }}
           ssh-key: ${{ secrets[vars.PRIVATE_DEPENDENCY_KEY_SECRET] }}
       - run: cargo fmt --all --check
-      - run: cargo test --locked -p allowit-cli
-      - run: cargo test --locked -p allowit-policy-template
+      - run: cargo test --locked -p allowit-cli -p allowit-policy-template --no-run
+      - run: scripts/no-network.sh cargo test --locked --offline -p allowit-cli
+      - run: scripts/no-network.sh cargo test --locked --offline -p allowit-policy-template
       - run: cargo clippy --locked -p allowit-cli --all-targets -- -D warnings
+  # The end-to-end tests with the whole suite: fixture servers on loopback.
+  end-to-end:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # No Rust cache in this job. This repository is public: a pull request from a fork can
+      # restore caches of the base branch, and a cache of ~/.cargo/git or target/ would hold
+      # private source and its build output.
+      - name: Fetch private and locked sources
+        uses: ./.github/actions/private-dependency
+        with:
+          repository: ${{ secrets.PRIVATE_DEPENDENCY_REPOSITORY }}
+          ssh-key: ${{ secrets[vars.PRIVATE_DEPENDENCY_KEY_SECRET] }}
+      - run: cargo test --locked -p allowit-cli --features e2e
