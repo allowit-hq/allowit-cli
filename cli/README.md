@@ -54,7 +54,7 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | --- | --- |
 | `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`; then report the public key to the owner and run the command again |
 | `draft` | The owner has the key and has not signed: wait and run the command again |
-| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the owner's instructions; the limits in the asset's unit |
+| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
 Once the server admits the key, the help shows the owner's instructions: each message that the owner wrote when

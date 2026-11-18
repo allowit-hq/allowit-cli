@@ -628,6 +628,13 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         with_url(&format!("{cli} status pay-0001 --wait 60s")),
                     ),
                     ("history", format!("{cli} history")),
+                    // A paid service from the server's marketplace: `call` pays its seller through
+                    // the same policy, at most the price that it names.
+                    ("search", with_url(&format!("{cli} skills search WORDS"))),
+                    (
+                        "call",
+                        with_url(&format!("{pay} call ENTRY --max-price {symbol}:AMOUNT")),
+                    ),
                 ];
             }
             _ => {
@@ -730,7 +737,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     if !examples.is_empty() {
         out.line("");
-        out.line("To pay (examples, not requests):");
+        out.line("To pay, or to find and buy a paid service (examples, not requests):");
         for (_, command) in &examples {
             out.line(format!("  {command}"));
         }
