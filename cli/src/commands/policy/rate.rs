@@ -85,6 +85,15 @@ fn text(value: &Value) -> String {
         .collect()
 }
 
+/// The entry of `request_id` in a read of votes. The server leaves out a request that the policy
+/// does not hold, so a missing entry is a usage error in every output format.
+fn requested(read: &Value, request_id: &str) -> Result<Value> {
+    match &read["requests"][request_id] {
+        Value::Null => Err(Error::usage("This policy holds no request with this ID")),
+        entry => Ok(entry.clone()),
+    }
+}
+
 pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     if !is_policy_id(&args.policy_id) {
         return Err(Error::usage("POLICY_ID is not a policy id"));
@@ -111,15 +120,12 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 &args.policy_id,
                 std::slice::from_ref(&args.request_id),
             )?;
-            read["requests"][&args.request_id].clone()
+            requested(&read, &args.request_id)?
         }
     };
     if cx.out.json {
         cx.out.json_value(&reply);
         return Ok(0);
-    }
-    if reply.is_null() {
-        return Err(Error::usage("This policy holds no request with this ID"));
     }
     let votes: std::collections::BTreeMap<Signal, Vote> =
         serde_json::from_value(reply["votes"].clone()).unwrap_or_default();
@@ -152,4 +158,18 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     cx.out.stdout.push_str(&term::render(&rows));
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requested;
+    use serde_json::json;
+
+    #[test]
+    fn a_request_that_the_policy_does_not_hold_is_an_error_in_every_format() {
+        let read = json!({"requests": {"r1": {"settled": true, "votes": {}}}});
+        assert_eq!(requested(&read, "r1").unwrap()["settled"], true);
+        assert!(requested(&read, "r2").is_err());
+        assert!(requested(&json!({"requests": {}}), "r1").is_err());
+    }
 }
