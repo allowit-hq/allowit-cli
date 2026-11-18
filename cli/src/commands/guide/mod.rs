@@ -58,6 +58,7 @@ mod tests {
             "allowit history",
             "- 20: the policy denied the request",
             "the owner's instructions as written",
+            "the payees that the owner allows",
             "allowit skills search WORDS",
             "allowit call ENTRY --max-price ASSET:AMOUNT",
             "start when the owner tells you to, or at once when the owner's instructions",

@@ -333,10 +333,13 @@ fn local_agent(cx: &mut Ctx, rail: &RailInfo, origin: &str, id: &str) -> Result<
     })
 }
 
-/// The server key that this command prints is the server's own claim. Text and JSON output
-/// both carry this sentence before the setup commands; `wallet import` pins the key.
-const SERVER_KEY_CHECK: &str =
-    "The owner sees the server key in the app under Agent access. If the two differ, stop.";
+/// The server key that this command prints is the server's own claim. `wallet import` pins it,
+/// and the CLI refuses to sign for another; the owner compares it with the key that the app shows
+/// under Agent access. Text and JSON output carry this sentence before the setup commands, so the
+/// agent does not stop to ask about the key.
+const SERVER_KEY_CHECK: &str = "The CLI pins this server key when it imports the wallet, and checks it before each signature. The owner checks it in the app: you have nothing to confirm.";
+/// The most allowed payees that the help lists.
+const MAX_PAYEES: usize = 64;
 
 /// One step: a title and its commands.
 struct Step {
@@ -503,6 +506,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     });
     let mut steps = vec![];
     let mut examples = vec![];
+    let mut payees: Vec<String> = vec![];
     let mut next = None;
     match state {
         "awaiting_agent_key" => {
@@ -599,15 +603,26 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                     (Some(symbol), None) => symbol.to_owned(),
                     (None, _) => "ASSET".to_owned(),
                 };
-                // The first allowed destination of the policy, when it lists them.
-                let destination = mine
+                // The payees that the owner allows, when the policy lists them: the payment
+                // command names the first one.
+                payees = mine
                     .profile
                     .as_ref()
                     .and_then(|profile| {
-                        profile["portable"]["params"]["destinations"]["List"][0]["Addr"].as_str()
+                        profile["portable"]["params"]["destinations"]["List"].as_array()
                     })
-                    .filter(|to| address::check_account(rail.family, to).is_ok())
-                    .and_then(|to| shell_safe(to, 128).ok())
+                    .map(|list| {
+                        list.iter()
+                            .take(MAX_PAYEES)
+                            .filter_map(|entry| entry["Addr"].as_str())
+                            .filter(|to| address::check_account(rail.family, to).is_ok())
+                            .filter_map(|to| shell_safe(to, 128).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let destination = payees
+                    .first()
+                    .cloned()
                     .unwrap_or_else(|| "DESTINATION".into());
                 // `--wallet` or `ALLOWIT_WALLET` of this call outranks the wallet that
                 // `wallet use` saves. When it names another wallet, the payment names the
@@ -651,7 +666,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
     }
     let rules = [
-        "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed payment is an example: run no test payment.",
+        "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed command is not one: run no test payment.",
         "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.",
         "Pay only with `allowit exec`: it pays from the policy wallet.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
@@ -673,6 +688,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             "serverKeyCheck": server_key.as_ref().map(|_| SERVER_KEY_CHECK),
             "steps": steps.iter().map(|step| json!({"title": step.title, "note": step.note, "commands": step.commands})).collect::<Vec<_>>(),
             "examples": examples.iter().map(|(name, command)| (name.to_string(), json!(command))).collect::<serde_json::Map<_, _>>(),
+            "allowedPayees": payees,
             "ownerWords": words,
             "limits": limits.iter().map(|(key, label, value)| json!({"key": key, "label": label, "value": value})).collect::<Vec<_>>(),
             "credits": credits.as_ref().map(|(evaluation, tariff, can_pay)| json!({
@@ -735,9 +751,16 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             out.line(note);
         }
     }
+    if !payees.is_empty() {
+        out.line("");
+        out.line("Payees that the owner allows (set in the policy, not examples):");
+        for payee in &payees {
+            out.line(format!("  {payee}"));
+        }
+    }
     if !examples.is_empty() {
         out.line("");
-        out.line("To pay, or to find and buy a paid service (examples, not requests):");
+        out.line("Commands to pay, or to find and buy a paid service (fill in AMOUNT; run one only for a task):");
         for (_, command) in &examples {
             out.line(format!("  {command}"));
         }

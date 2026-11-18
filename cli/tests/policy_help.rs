@@ -261,12 +261,15 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let origin = sandbox_url(&sandbox);
         let expected = [
             format!("Allowit policy {ID} on {origin}: active"),
-            "If the two differ, stop.".into(),
+            "The owner checks it in the app: you have nothing to confirm.".into(),
             format!("  allowit rail use {net} --rpc-url {ENDPOINT}"),
             // The local key that holds the agent public key, by its own name.
             "  allowit keys use payer".into(),
             format!("  ALLOWIT_URL={origin} allowit wallet import --policy={ID}"),
             format!("  allowit wallet use {wallet}"),
+            // The policy's payees are the owner's, not examples.
+            "Payees that the owner allows (set in the policy, not examples):".into(),
+            format!("  {destination}\n"),
             format!(
                 "  ALLOWIT_URL={origin} allowit exec --op transfer --to {destination} --amount UNIT:AMOUNT --request-id pay-0001"
             ),
@@ -281,7 +284,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             "  - Also pay Ben 150 on Fridays.\n".into(),
             "Payment limit".into(),
             "1 UNIT".into(),
-            "Start when the owner tells you to, or at once when the owner's instructions already say what to do.".into(),
+            "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed command is not one: run no test payment.".into(),
             "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.".into(),
             "Exit 20 means the policy denied the request.".into(),
         ];
@@ -416,8 +419,9 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
             value["serverKeyCheck"],
-            "The owner sees the server key in the app under Agent access. If the two differ, stop."
+            "The CLI pins this server key when it imports the wallet, and checks it before each signature. The owner checks it in the app: you have nothing to confirm."
         );
+        assert_eq!(value["allowedPayees"], json!([destination]));
         // An IPv6 endpoint is one quoted shell word.
         let mut v6 = public.clone();
         v6["endpoint"] = json!("https://[2001:db8::1]:8443/rpc");
@@ -465,6 +469,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         assert_eq!(value["wallet"], Value::Null);
         assert_eq!(value["limits"], json!([]));
         assert_eq!(value["ownerWords"], json!([]));
+        assert_eq!(value["allowedPayees"], json!([]));
         assert_eq!(value["steps"], json!([]));
         assert_eq!(value["examples"], json!({}));
         assert!(value["next"].as_str().unwrap().contains("cannot pay"));

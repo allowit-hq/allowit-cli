@@ -54,14 +54,14 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | --- | --- |
 | `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`; then report the public key to the owner and run the command again |
 | `draft` | The owner has the key and has not signed: wait and run the command again |
-| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
+| `active` | The server key, which `wallet import` pins and the CLI checks before each signature; `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; the payees that the policy allows; one command each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
 Once the server admits the key, the help shows the owner's instructions: each message that the owner wrote when
 making the policy, as written, beside the limits (`ownerWords` in `--json`). Its first rules guide the start: start
 when the owner says so, or at once when the owner's instructions already say what to do; ask the owner when a
-request disagrees with them; never pay outside the policy. Setting up is not a task, and the printed payment is an
-example. The command changes nothing: it pins no server key and imports no profile.
+request disagrees with them; never pay outside the policy. Setting up is not a task, and a printed command is not
+one. The payees that the policy lists are the owner's, not examples (`allowedPayees` in `--json`). The command changes nothing: it pins no server key and imports no profile.
 
 A policy id is a pointer, not a credential. By the id alone the server answers only what an agent needs before it
 proves its key: the state, the network and its endpoint, the wallet kind and the server key. The agent key, the
