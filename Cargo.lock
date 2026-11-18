@@ -65,7 +65,7 @@ dependencies = [
 [[package]]
 name = "allowit-sdk"
 version = "0.5.0"
-source = "git+https://github.com/allowit-hq/allowit-sdk.git?rev=b4a555b679b9472992da93b82058935705f2148d#b4a555b679b9472992da93b82058935705f2148d"
+source = "git+https://github.com/allowit-hq/allowit-sdk.git?rev=1d79c04a20e05e87e688cdba390410c5f76bbd7e#1d79c04a20e05e87e688cdba390410c5f76bbd7e"
 dependencies = [
  "allowit-core",
  "allowit-stellar",
