@@ -57,7 +57,9 @@ mod tests {
             "allowit status ID --wait 60s",
             "allowit history",
             "- 20: the policy denied the request",
-            "pay without a request from the owner",
+            "the owner's instructions as the owner wrote them",
+            "start when the owner tells you to, or at once when the owner's instructions",
+            "pay outside the policy",
             "keys export",
         ] {
             assert!(guide.contains(part), "{part}");

@@ -18,7 +18,7 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy kinds\n  allowit 
 pub(crate) enum Command {
     /// Read original owner transaction receipts
     OwnerStatus(owner::Status),
-    /// Deploy a reviewed policy and executable
+    /// Deploy a reviewed policy: a contract wallet with its executable, or a Native wallet account
     #[command(before_help=owner::EXAMPLES)]
     Deploy(owner::Deploy),
     /// Fund the selected policy wallet

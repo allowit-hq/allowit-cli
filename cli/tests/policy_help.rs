@@ -230,6 +230,10 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
                 json!([{"key":"payment_limit","label":"Payment limit","value":"1 UNIT"}]);
             theirs["profile"] =
                 json!({"portable":{"params":{"destinations":{"List":[{"Addr":destination}]}}}});
+            theirs["ownerWords"] = json!([
+                "Every Friday pay Ana 100.\nOnly Ana's address.",
+                "Also pay Ben 150 on Fridays.",
+            ]);
             (public, theirs)
         };
         let (public, body) = answers(ID);
@@ -268,9 +272,14 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             ),
             format!("  ALLOWIT_URL={origin} allowit status pay-0001 --wait 60s"),
             "  allowit history".into(),
+            // The owner's words beside the limits, each message as the owner wrote it.
+            "Owner's instructions (as the owner wrote them when making this policy):".into(),
+            "  - Every Friday pay Ana 100.\n    Only Ana's address.\n".into(),
+            "  - Also pay Ben 150 on Fridays.\n".into(),
             "Payment limit".into(),
             "1 UNIT".into(),
-            "Pay only when the owner asks, and only that amount.".into(),
+            "Start when the owner tells you to, or at once when the owner's instructions already say what to do.".into(),
+            "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.".into(),
             "Exit 20 means the policy denied the request.".into(),
         ];
         let mut at = 0;
@@ -295,6 +304,13 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["agentPublicKey"], agent.as_str());
         assert_eq!(value["localKey"], "payer");
+        assert_eq!(
+            value["ownerWords"],
+            json!([
+                "Every Friday pay Ana 100.\nOnly Ana's address.",
+                "Also pay Ben 150 on Fridays."
+            ])
+        );
         let commands: Vec<&str> = value["steps"][0]["commands"]
             .as_array()
             .unwrap()
@@ -445,6 +461,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         assert_eq!(value["agentPublicKey"], Value::Null);
         assert_eq!(value["wallet"], Value::Null);
         assert_eq!(value["limits"], json!([]));
+        assert_eq!(value["ownerWords"], json!([]));
         assert_eq!(value["steps"], json!([]));
         assert_eq!(value["examples"], json!({}));
         assert!(value["next"].as_str().unwrap().contains("cannot pay"));
@@ -478,6 +495,8 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
                 json!([{"key":"k","label":"line\nbreak","value":"1"}]),
                 false,
             ),
+            ("ownerWords", json!(["x".repeat(3_001)]), false),
+            ("ownerWords", json!(vec!["x"; 33]), false),
         ] {
             let (mut bad_public, mut bad_body) = (public.clone(), body.clone());
             if in_public {

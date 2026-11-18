@@ -7,7 +7,7 @@ use crate::{
 };
 use allowit_sdk::generation::{self, GenerateRequest, Target};
 
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy kinds\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --kind standard --new-wallet 'Pay only my approved recipient'";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy kinds\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --kind native --new-wallet 'Pay only my approved recipient'\n  allowit policy generate --owner-key owner --origin http://localhost:5173 --kind standard --new-wallet 'Pay only my approved recipient'";
 
 /// Generate a portable draft through the owner-authenticated server; does not deploy or spend
 #[derive(clap::Args, Debug)]

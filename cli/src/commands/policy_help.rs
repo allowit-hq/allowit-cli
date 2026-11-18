@@ -6,8 +6,9 @@
 //! (state, network and endpoint, wallet kind, server key). This command reads
 //! them, then asks as the policy's agent with each local key of the rail, the
 //! selected one first, until the server admits one: only the agent reads its
-//! wallet, limits and profile. It prints the agent's next commands in order,
-//! with every value filled in. It changes nothing: it pins no server key and
+//! wallet, limits, profile and the owner's words. It prints the agent's next
+//! commands in order, with every value filled in, and the owner's instructions
+//! as the owner wrote them. It changes nothing: it pins no server key and
 //! imports no profile. The server key that it prints is the server's own claim;
 //! the owner compares it with the key that the app shows, and `wallet import`
 //! pins it.
@@ -40,8 +41,8 @@ pub(crate) struct Args {
 
 /// The server's answer to `GET /api/agent/policy?id=POLICY_ID`, the public
 /// facts, or to the agent's signed `POST /api/agent/policy`, which adds the
-/// agent key, the wallet, the limits, the profile and the credits. Unknown
-/// fields are ignored, so a later server can add facts.
+/// agent key, the owner's words, the wallet, the limits, the profile and the
+/// credits. Unknown fields are ignored, so a later server can add facts.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Facts {
@@ -67,6 +68,9 @@ pub(crate) struct Facts {
     pub profile: Option<Value>,
     #[serde(default)]
     pub credits: Option<CreditFacts>,
+    /// Each message that the owner wrote when making the policy, oldest first.
+    #[serde(default)]
+    pub owner_words: Vec<String>,
 }
 
 /// What an evaluation of the policy costs its owner, and whether the owner
@@ -102,6 +106,38 @@ fn shown(text: &str, limit: usize) -> Result<String> {
         return Err(invalid());
     }
     Ok(text.to_owned())
+}
+
+/// The most owner messages that the help shows: a policy's conversation holds fewer.
+const MAX_OWNER_MESSAGES: usize = 32;
+/// The most characters of one owner message: the server's bound of a policy request.
+const MAX_OWNER_MESSAGE: usize = 3_000;
+
+/// The owner's words as the help prints them: each message as the owner wrote it, with line
+/// breaks kept and no other control character, so a message cannot move the cursor, color or
+/// clear the terminal. An empty message is left out. More messages or a longer one than the
+/// server allows are invalid facts.
+fn owner_words(words: &[String]) -> Result<Vec<String>> {
+    if words.len() > MAX_OWNER_MESSAGES {
+        return Err(invalid());
+    }
+    words
+        .iter()
+        .map(|text| {
+            if text.chars().count() > MAX_OWNER_MESSAGE {
+                return Err(invalid());
+            }
+            let text = text.replace("\r\n", "\n").replace('\r', "\n");
+            Ok(text
+                .chars()
+                .map(|c| if c == '\t' { ' ' } else { c })
+                .filter(|c| *c == '\n' || !c.is_control())
+                .collect::<String>()
+                .trim()
+                .to_owned())
+        })
+        .filter(|text| !matches!(text, Ok(text) if text.is_empty()))
+        .collect()
 }
 
 /// A server value that this command prints inside a command line. Only
@@ -399,6 +435,11 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    // What the owner told the agent when making the policy. Only the policy's agent reads it.
+    let words = owner_words(
+        mine.map(|mine| mine.owner_words.as_slice())
+            .unwrap_or_default(),
+    )?;
     // The price of one evaluation, which the owner pays. Only the policy's agent reads it.
     let credits = mine
         .and_then(|mine| mine.credits.as_ref())
@@ -603,7 +644,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
     }
     let rules = [
-        "Pay only when the owner asks, and only that amount. Setting up is not a request, and the commands above are examples: run no payment to test the setup.",
+        "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and the commands above are examples: run no test payment.",
+        "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.",
         "Pay only with `allowit exec`: it pays from the policy wallet.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
         "Never print, copy or move a secret key. Never change the policy: only the owner can.",
@@ -624,6 +666,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             "serverKeyCheck": server_key.as_ref().map(|_| SERVER_KEY_CHECK),
             "steps": steps.iter().map(|step| json!({"title": step.title, "note": step.note, "commands": step.commands})).collect::<Vec<_>>(),
             "examples": examples.iter().map(|(name, command)| (name.to_string(), json!(command))).collect::<serde_json::Map<_, _>>(),
+            "ownerWords": words,
             "limits": limits.iter().map(|(key, label, value)| json!({"key": key, "label": label, "value": value})).collect::<Vec<_>>(),
             "credits": credits.as_ref().map(|(evaluation, tariff, can_pay)| json!({
                 "evaluation": evaluation, "tariff": tariff, "paidBy": "owner", "ownerCanPay": can_pay,
@@ -687,9 +730,20 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     }
     if !examples.is_empty() {
         out.line("");
-        out.line("When the owner asks you to pay (examples, not requests):");
+        out.line("To pay (examples, not requests):");
         for (_, command) in &examples {
             out.line(format!("  {command}"));
+        }
+    }
+    if !words.is_empty() {
+        out.line("");
+        out.line("Owner's instructions (as the owner wrote them when making this policy):");
+        for text in &words {
+            let mut lines = text.lines();
+            out.line(format!("  - {}", lines.next().unwrap_or_default()));
+            for line in lines {
+                out.line(format!("    {line}").trim_end());
+            }
         }
     }
     if !limits.is_empty() {
@@ -755,6 +809,26 @@ mod tests {
         assert!(shown("line\nbreak", 80).is_err());
         assert!(shown("\u{1b}[31m", 80).is_err());
         assert_eq!(shown("1 UNIT", 80).unwrap(), "1 UNIT");
+    }
+
+    #[test]
+    fn the_owner_words_keep_their_text_and_lines_and_lose_control_characters() {
+        let words = [
+            "Every Friday pay Ana 100.\r\nOnly Ana.".to_owned(),
+            "   ".to_owned(),
+            "Red \u{1b}[31mtext\u{7}\tand a tab".to_owned(),
+        ];
+        assert_eq!(
+            owner_words(&words).unwrap(),
+            [
+                "Every Friday pay Ana 100.\nOnly Ana.",
+                "Red [31mtext and a tab"
+            ]
+        );
+        assert!(owner_words(&["x".repeat(MAX_OWNER_MESSAGE)]).is_ok());
+        assert!(owner_words(&["x".repeat(MAX_OWNER_MESSAGE + 1)]).is_err());
+        assert!(owner_words(&vec!["x".to_owned(); MAX_OWNER_MESSAGES + 1]).is_err());
+        assert!(owner_words(&[]).unwrap().is_empty());
     }
 
     #[test]

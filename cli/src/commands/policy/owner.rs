@@ -6,7 +6,7 @@ use crate::{
 };
 use allowit_sdk::owner as shared;
 use std::path::PathBuf;
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes\n  allowit --rpc-url URL policy deploy native-draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --amount 10 --request-id deploy-0002 --fee-limit 2000000000 --yes";
 #[derive(clap::Args, Debug)]
 pub(crate) struct Session {
     /// Named local owner key, independent of the selected agent key
@@ -31,9 +31,9 @@ pub(crate) struct Deploy {
     /// Independent server signing address
     #[arg(long)]
     pub server: String,
-    /// Reviewed executable for the selected wallet capability
+    /// Reviewed executable of a contract wallet; a Native wallet is an account and takes none
     #[arg(long)]
-    pub executable: PathBuf,
+    pub executable: Option<PathBuf>,
     /// Total fee ceiling in the selected rail's base units
     #[arg(long)]
     pub fee_limit: String,
@@ -102,8 +102,26 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     let draft = read_input(&a.policy_file)?;
-    let executable = read_input(&a.executable)?;
-    cx.confirm("Deploy and fund this exact policy wallet using the owner account")?;
+    // A Native wallet is the agent's own account: its deployment creates and funds the account
+    // and binds the draft to it, and the rail refuses an executable for it.
+    let native = serde_json::from_slice::<serde_json::Value>(&draft)
+        .ok()
+        .and_then(|draft| allowit_sdk::generation::wallet_kind_of(&draft))
+        == Some(allowit_sdk::generation::WalletKind::Native);
+    let executable = match &a.executable {
+        Some(path) => read_input(path)?,
+        None if native => Vec::new(),
+        None => {
+            return Err(Error::usage(
+                "A contract wallet deploys reviewed code: name it with --executable",
+            ));
+        }
+    };
+    cx.confirm(if native {
+        "Create and fund the agent's wallet account from the owner account, and bind this exact policy to it"
+    } else {
+        "Deploy and fund this exact policy wallet using the owner account"
+    })?;
     let network = cx.rail()?.id;
     let out = shared::deploy(
         &local.context(&a.session.origin),
