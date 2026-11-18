@@ -54,7 +54,7 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | --- | --- |
 | `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`; then report the public key to the owner and run the command again |
 | `draft` | The owner has the key and has not signed: wait and run the command again |
-| `active` | The server key, which `wallet import` pins and the CLI checks before each signature; `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; the payees that the policy allows; one command each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
+| `active` | The server key, which `wallet import` pins and the CLI checks before each signature; `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID --server-key KEY`, `wallet use WALLET`; the payees that the policy allows; one command each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
 Once the server admits the key, the help shows the owner's instructions: each message that the owner wrote when
@@ -76,8 +76,9 @@ does not answer.
 `wallet import --policy POLICY_ID` reads the policy's profile with the selected agent key and verifies it as a file
 import does: against the server key and the rail's own endpoint. The server key comes from the public answer, which
 the owner compares with the key that the app shows. The import pins it for that server when the server has no pin
-yet. A pinned key differs from the answer: the import stops with `server_key_differs`. Only `rail trust` changes a
-pin.
+yet. A pinned key differs from the answer: the import stops with `server_key_differs`. The import line that the
+help prints names the key that the help showed (`--server-key KEY`), and the import stops the same way when the server
+answers another key. Only `rail trust` changes a pin.
 `rail use RAIL --rpc-url URL` keeps the endpoint
 for that rail, so later commands need no flag.
 [`skills/allowit/SKILL.md`](skills/allowit/SKILL.md) is the agent skill for the whole journey; `allowit guide`

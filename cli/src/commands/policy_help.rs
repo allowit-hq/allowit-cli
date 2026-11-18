@@ -337,7 +337,7 @@ fn local_agent(cx: &mut Ctx, rail: &RailInfo, origin: &str, id: &str) -> Result<
 /// and the CLI refuses to sign for another; the owner compares it with the key that the app shows
 /// under Agent access. Text and JSON output carry this sentence before the setup commands, so the
 /// agent does not stop to ask about the key.
-const SERVER_KEY_CHECK: &str = "The CLI pins this server key when it imports the wallet, and checks it before each signature. The owner checks it in the app: you have nothing to confirm.";
+const SERVER_KEY_CHECK: &str = "The import command below names this server key: the CLI imports only with it, pins it and checks it before each signature. The owner checks it in the app: you have nothing to confirm.";
 /// The most allowed payees that the help lists.
 const MAX_PAYEES: usize = 64;
 
@@ -585,8 +585,13 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                     commands: vec![
                         select,
                         format!("{cli} keys use {name}"),
-                        // The attached form: an id can start with a hyphen.
-                        with_url(&format!("{cli} wallet import --policy={}", args.id)),
+                        // The attached form: an id can start with a hyphen. The import takes only
+                        // the server key that this help printed.
+                        with_url(&format!(
+                            "{cli} wallet import --policy={} --server-key {}",
+                            args.id,
+                            server_key.as_deref().unwrap_or_default()
+                        )),
                         format!("{cli} wallet use {wallet}"),
                     ],
                 });
@@ -615,7 +620,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         list.iter()
                             .take(MAX_PAYEES)
                             .filter_map(|entry| entry["Addr"].as_str())
-                            .filter(|to| address::check_account(rail.family, to).is_ok())
+                            .filter(|to| address::check_recipient(rail.family, to).is_ok())
                             .filter_map(|to| shell_safe(to, 128).ok())
                             .collect()
                     })
@@ -668,7 +673,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let rules = [
         "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed command is not one: run no test payment.",
         "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.",
-        "Pay only with `allowit exec`: it pays from the policy wallet.",
+        "Pay with `allowit exec`, and buy a paid service with `allowit call`: both pay from the policy wallet, and the policy decides each payment.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
         "Never print, copy or move a secret key. Never change the policy: only the owner can.",
     ];

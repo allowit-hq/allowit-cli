@@ -7,7 +7,7 @@ use crate::{
 use std::path::PathBuf;
 pub(crate) const EXAMPLES: &str = "\
 Examples:
-  allowit wallet import --policy POLICY_ID
+  allowit wallet import --policy POLICY_ID --server-key PUBLIC_KEY
   allowit wallet import profile.json";
 
 /// Verify and cache a public profile without changing the selected agent key
@@ -19,6 +19,9 @@ pub(crate) struct Args {
     /// Read the profile of this policy id from the ALLOWIT_URL server, as its agent
     #[arg(long, value_name = "POLICY_ID", allow_hyphen_values = true)]
     pub policy: Option<String>,
+    /// The server key that `allowit POLICY_ID help` printed: the import refuses another
+    #[arg(long, value_name = "PUBLIC_KEY", requires = "policy")]
+    pub server_key: Option<String>,
 }
 pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let rail = cx.rail()?;
@@ -30,7 +33,7 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let (bytes, pin) = match (&a.profile_file, &a.policy) {
         (Some(file), _) => (read_input(file)?, None),
         (None, Some(id)) => {
-            let read = presign::policy_profile(cx, rail, id)?;
+            let read = presign::policy_profile(cx, rail, id, a.server_key.as_deref())?;
             (read.profile, read.pin)
         }
         (None, None) => return Err(Error::usage("name a profile file or --policy POLICY_ID")),
