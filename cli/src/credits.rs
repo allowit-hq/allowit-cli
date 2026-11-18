@@ -8,13 +8,10 @@
 //! evaluation of one request cost, for the receipt and the status, and it
 //! explains the refusals that name credits: what happened and what the owner
 //! must do. Every server text is checked before it is printed.
-use crate::error::Error;
-use allowit_sdk::transport::{
-    http::{HttpClient, Method, Request},
-    rpc::Options,
-};
+use crate::{agent_read, error::Error};
+use allowit_sdk::wallet::LocalSigner;
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 /// The key of the charge in a receipt, a status and a JSON error.
 pub(crate) const KEY: &str = "credits";
@@ -197,56 +194,62 @@ impl Charge {
     }
 }
 
-/// Where the charge of a request is read: the server and the policy.
-#[derive(Clone, Debug, Default)]
+/// Where the charge of a request is read: the server, the policy and the
+/// agent key that signs the read.
+#[derive(Clone, Default)]
 pub(crate) struct Lookup {
     origin: Option<String>,
     policy: Option<String>,
+    signer: Option<Rc<LocalSigner>>,
 }
 
 impl Lookup {
     /// `policy` is the policy of a binding: the policy id, or `id@module digest`.
-    pub(crate) fn new(origin: Option<String>, policy: Option<String>) -> Self {
+    /// `signer` is the agent key: the server answers the charge to the policy's
+    /// agent only.
+    pub(crate) fn new(
+        origin: Option<String>,
+        policy: Option<String>,
+        signer: Option<LocalSigner>,
+    ) -> Self {
         let policy = policy.map(|policy| match policy.split_once('@') {
             Some((id, _)) => id.to_owned(),
             None => policy,
         });
-        Self { origin, policy }
+        Self {
+            origin,
+            policy,
+            signer: signer.map(Rc::new),
+        }
     }
-    /// The charge of `request`, when the server holds one. It is a read
-    /// without a credential, and a server that does not answer it leaves the
-    /// result of the command as it is.
+    /// The charge of `request`, when the server holds one. The agent key signs
+    /// the read, and a server that does not answer it leaves the result of the
+    /// command as it is.
     pub(crate) fn read(&self, request: &str) -> Option<Charge> {
         let origin = crate::config::parse_origin(self.origin.as_deref()?).ok()?;
         let policy = self.policy.as_deref()?;
+        let signer = self.signer.as_deref()?;
         if !crate::commands::policy_help::is_policy_id(policy)
             || !crate::request::request_id_valid(request)
         {
             return None;
         }
-        let url = format!("{origin}/api/agent/charge?id={policy}&request={request}");
-        let client = HttpClient::new(Options {
-            timeout: Duration::from_secs(5),
-            max_response_bytes: 64 << 10,
-            no_proxy: false,
-            connect_timeout: Some(Duration::from_secs(3)),
-        })
+        let (status, body) = agent_read::post(
+            &origin,
+            agent_read::CHARGE_PATH,
+            &json!({"policyId": policy, "requestId": request}),
+            signer,
+            agent_read::Limits {
+                timeout: Duration::from_secs(5),
+                connect: Duration::from_secs(3),
+                max_bytes: 64 << 10,
+            },
+        )
         .ok()?;
-        let response = client
-            .send_refusal_body(
-                Request {
-                    method: Method::Get,
-                    url: &url,
-                    headers: &[("accept".into(), "application/json".into())],
-                    body: None,
-                },
-                None,
-            )
-            .ok()?;
-        if response.status != 200 {
+        if status != 200 {
             return None;
         }
-        let body: Value = serde_json::from_slice(&response.body).ok()?;
+        let body: Value = serde_json::from_slice(&body).ok()?;
         Charge::of(&body[KEY])
     }
     /// `document` with the charge of `request`, when the server holds one.
@@ -464,15 +467,19 @@ mod tests {
         let lookup = Lookup::new(
             Some("http://127.0.0.1:9".into()),
             Some("not a policy id".into()),
+            None,
         );
         assert!(lookup.read("pay-0001").is_none());
         let lookup = Lookup::new(
             Some("http://127.0.0.1:9".into()),
             Some("Xg7IxRXCr2MhVdRrTFoYKeAw".into()),
+            None,
         );
         assert!(lookup.read("bad id").is_none());
+        // Without the agent key there is no read: the server answers the agent only.
+        assert!(lookup.read("pay-0001").is_none());
         // A binding names its policy with the module digest: the lookup asks by the policy id.
-        let bound = Lookup::new(None, Some("Xg7IxRXCr2MhVdRrTFoYKeAw@0123abcd".into()));
+        let bound = Lookup::new(None, Some("Xg7IxRXCr2MhVdRrTFoYKeAw@0123abcd".into()), None);
         assert_eq!(bound.policy.as_deref(), Some("Xg7IxRXCr2MhVdRrTFoYKeAw"));
     }
 }

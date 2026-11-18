@@ -160,8 +160,11 @@ impl Rail {
                 ..Default::default()
             });
         }
-        let authority = cx.server_authority(self.0)?;
-        let p = self.profile(cx, wallet)?.with_authority(&authority)?;
+        // The profile's server key co-signs every operation: it must be the key pinned for
+        // its server, and a different key is refused before anything is signed.
+        let p = self.profile(cx, wallet)?;
+        let authority = crate::presign::authority(cx, self.0, &p)?;
+        let p = p.with_authority(&authority)?;
         Ok(Binding {
             policy: Some(format!(
                 "{}@{}",
@@ -242,8 +245,9 @@ impl Rail {
             return None;
         }
         let mut read = || {
-            let authority = cx.server_authority(self.0)?;
-            let p = self.profile(cx, wallet)?.with_authority(&authority)?;
+            let p = self.profile(cx, wallet)?;
+            let authority = crate::presign::authority(cx, self.0, &p)?;
+            let p = p.with_authority(&authority)?;
             let signer = self.signer(cx)?;
             let root = cx.dir()?;
             let rpc = cx.rpc_url(self.0)?;
@@ -433,7 +437,9 @@ impl Rail {
                     .then(|| cx.server_url().ok())
                     .flatten()
             });
-        crate::credits::Lookup::new(origin, binding.policy.clone())
+        // The server answers the charge to the policy's agent only: the agent key signs it.
+        let signer = self.signer(cx).ok();
+        crate::credits::Lookup::new(origin, binding.policy.clone(), signer)
     }
     /// Sends one request and returns its outcome with the per-payment limits
     /// of its profile, and prints nothing. `exec` prints the receipt; a paid
@@ -490,6 +496,11 @@ impl Rail {
         let signer = self.signer(cx)?;
         let payment = Self::payment_limits(&p);
         crate::flush_stderr(&mut cx.out.stderr);
+        // Before the agent key signs anything: the policy names this wallet and the pinned
+        // server key, and the ledger holds the wallet as its kind needs.
+        allowit_sdk::progress::report("Checking the policy and its wallet before signing");
+        let pinned = p.require_authority()?.public_key().to_owned();
+        crate::presign::check_before_signing(self.0, &p, &pinned, &signer, rpc.as_deref())?;
         let out = allowit_sdk::execution::execute(p, signer, &root, rpc, r)?;
         Ok((out, payment))
     }

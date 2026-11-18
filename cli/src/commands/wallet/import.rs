@@ -2,6 +2,7 @@
 use crate::{
     ctx::{Ctx, read_input},
     error::{Error, Result},
+    presign,
 };
 use std::path::PathBuf;
 pub(crate) const EXAMPLES: &str = "\
@@ -15,7 +16,7 @@ pub(crate) struct Args {
     /// The public profile file that the owner exported
     #[arg(required_unless_present = "policy", conflicts_with = "policy")]
     pub profile_file: Option<PathBuf>,
-    /// Read the public profile of this policy id from the ALLOWIT_URL server
+    /// Read the profile of this policy id from the ALLOWIT_URL server, as its agent
     #[arg(long, value_name = "POLICY_ID", allow_hyphen_values = true)]
     pub policy: Option<String>,
 }
@@ -24,35 +25,30 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let rpc = cx
         .rpc_url(rail)?
         .ok_or_else(|| Error::config("Select an independent RPC endpoint to verify this import"))?;
-    let authority = cx.server_authority(rail)?;
     // A profile from the server takes the same checks as a file: the pinned
     // server key and the independent endpoint decide, not the transport.
-    let bytes = match (&a.profile_file, &a.policy) {
-        (Some(file), _) => read_input(file)?,
+    let (bytes, pin) = match (&a.profile_file, &a.policy) {
+        (Some(file), _) => (read_input(file)?, None),
         (None, Some(id)) => {
-            let (_, facts) = crate::commands::policy_help::fetch(cx, id)?;
-            let profile = facts.profile.ok_or_else(|| {
-                Error::config(format!(
-                    "this policy is not active yet; run allowit {id} help"
-                ))
-            })?;
-            // The answer must be the profile of the policy that was asked for: the checks
-            // below prove the server and the chain state of a profile, not which policy it is.
-            if profile["policyId"].as_str() != Some(id.as_str()) {
-                return Err(Error::uncertain(
-                    "The server returned the profile of another policy",
-                ));
-            }
-            serde_json::to_vec(&profile).map_err(|_| Error::config("Cannot encode the profile"))?
+            let read = presign::policy_profile(cx, rail, id)?;
+            (read.profile, read.pin)
         }
         (None, None) => return Err(Error::usage("name a profile file or --policy POLICY_ID")),
     };
+    let authority = match &pin {
+        Some(pin) => pin.authority.clone(),
+        None => cx.server_authority(rail)?,
+    };
     let cache = allowit_sdk::profiles::Cache::open(&cx.dir()?)?;
     let p = cache.import(&authority, &rpc, &bytes)?;
+    // The policy's server key is pinned once the import stands: a later answer of another key
+    // is refused before the agent signs.
+    if let Some(pin) = &pin {
+        pin.save(cx, rail)?;
+    }
     // A profile that the agent asked for by its policy id becomes the selected version of its
     // wallet for the selected agent key. An older cached version of the same wallet, such as
-    // the one before a value change, then cannot serve the next request. The import stands
-    // when the selected key is not the agent of this profile: the selection is then skipped.
+    // the one before a value change, then cannot serve the next request.
     if a.policy.is_some()
         && let Ok(agent) = cx.agent(rail)
         && let Some(wallet) = serde_json::from_slice::<serde_json::Value>(&bytes)
@@ -67,6 +63,12 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
             ..Default::default()
         });
     }
-    cx.out.value(&p.inspect()?);
+    let mut shown = p.inspect()?;
+    if let Some(pin) = &pin
+        && pin.new
+    {
+        shown["pinnedServerKey"] = pin.authority.public_key().into();
+    }
+    cx.out.value(&shown);
     Ok(0)
 }
