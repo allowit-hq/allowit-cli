@@ -574,6 +574,34 @@ fn the_help_shows_the_credits_that_each_request_costs_the_owner() {
     });
 }
 
+/// A device with more local keys than the help tries says so: it names no missing key and
+/// tells the agent to select the key that it gave the owner.
+#[test]
+fn a_search_that_leaves_keys_untried_says_to_select_the_agent_key() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let mut sandbox = Sandbox::new("policy-help-many-keys");
+        sandbox.ok(&["rail", "use", net]);
+        for n in 1..=9 {
+            sandbox.ok(&["keys", "generate", &format!("key-{n}")]);
+        }
+        let mut public = facts(net, "active");
+        public["serverPublicKey"] = json!(rail.account(13).0);
+        let mut replies = vec![(200, public)];
+        replies.extend((0..8).map(|_| not_agent()));
+        let (output, requests) = served(&mut sandbox, &["--json", ID, "help"], replies);
+        assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+        // The public read and eight signed reads, no more.
+        assert_eq!(requests.len(), 9);
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["steps"], json!([]));
+        let next = value["next"].as_str().unwrap();
+        assert!(next.contains("more than 8 keys"), "{next}");
+        assert!(next.contains("keys use NAME"), "{next}");
+        assert!(!next.contains("cannot pay"), "{next}");
+    });
+}
+
 #[test]
 fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes() {
     every_rail(|rail| {

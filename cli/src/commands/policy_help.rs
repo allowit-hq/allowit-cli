@@ -260,15 +260,21 @@ pub(crate) fn read_as_agent(origin: &str, id: &str, signer: &LocalSigner) -> Res
 /// The most local keys that the help tries as the policy's agent.
 const MAX_AGENT_KEYS: usize = 8;
 
+/// What the search for the local agent key of a policy found.
+enum LocalAgent {
+    /// The local key that the server admits as the policy's agent, with its facts.
+    Found(String, Box<Facts>),
+    /// The server admits none of the local keys of the rail.
+    None,
+    /// The server admits none of the keys that the search tried, and more keys were left.
+    Untried,
+}
+
 /// The local key of `rail` that is the agent key of policy `id`, with the facts that only the
 /// agent reads. The rail's selected agent key goes first, then each other local key of the
-/// rail; the first key that the server admits ends the search.
-fn local_agent(
-    cx: &mut Ctx,
-    rail: &RailInfo,
-    origin: &str,
-    id: &str,
-) -> Result<Option<(String, Facts)>> {
+/// rail; the first key that the server admits ends the search. At most [`MAX_AGENT_KEYS`] keys
+/// are tried; a search that leaves keys untried says so.
+fn local_agent(cx: &mut Ctx, rail: &RailInfo, origin: &str, id: &str) -> Result<LocalAgent> {
     let dir = cx.dir()?;
     let selected = cx.settings()?.rail(rail.id).agent;
     let mut candidates: Vec<keys::Key> = keys::list(&dir)?
@@ -277,13 +283,18 @@ fn local_agent(
         .filter(|key| key.secret && key.check_rail(rail.id).is_ok())
         .collect();
     candidates.sort_by_key(|key| Some(&key.name) != selected.as_ref());
+    let untried = candidates.len() > MAX_AGENT_KEYS;
     for key in candidates.into_iter().take(MAX_AGENT_KEYS) {
         let signer = allowit_sdk::wallet::local_signer(rail.id, &keys::signer_path(&dir, &key)?)?;
         if let Some(facts) = read_as_agent(origin, id, &signer)? {
-            return Ok(Some((key.name, facts)));
+            return Ok(LocalAgent::Found(key.name, Box::new(facts)));
         }
     }
-    Ok(None)
+    Ok(if untried {
+        LocalAgent::Untried
+    } else {
+        LocalAgent::None
+    })
 }
 
 /// The server key that this command prints is the server's own claim. Text and JSON output
@@ -316,12 +327,13 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let state = state.as_str();
     // Only the policy's agent reads its key, wallet, limits and profile. A device that holds
     // no local key that the server admits as the agent reads the public facts only.
-    let (local, mine) = match state {
+    let (local, mine, untried) = match state {
         "draft" | "active" => match local_agent(cx, rail, &origin, &args.id)? {
-            Some((name, mine)) => (Some(name), Some(mine)),
-            None => (None, None),
+            LocalAgent::Found(name, mine) => (Some(name), Some(*mine), false),
+            LocalAgent::None => (None, None, false),
+            LocalAgent::Untried => (None, None, true),
         },
-        _ => (None, None),
+        _ => (None, None, false),
     };
     // The agent's answer holds the public facts too, and they must be the same.
     if let Some(mine) = &mine
@@ -497,6 +509,11 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             };
             next = Some(format!(
                 "{public} Then wait. When the owner has signed, run: {again}"
+            ));
+        }
+        "draft" | "active" if untried => {
+            next = Some(format!(
+                "This device holds more than {MAX_AGENT_KEYS} keys of this rail, and none that was tried is the agent key of this policy. Select the key that you gave the owner (`{cli} keys use NAME`), then run: {again}"
             ));
         }
         "draft" => {
