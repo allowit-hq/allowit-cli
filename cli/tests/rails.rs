@@ -13,6 +13,7 @@ use common::{Mock, Rail, Sandbox, code, each_rail, every_rail, stderr, stdout};
 use serde_json::{Value, json};
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn unknown_rail_keeps_the_cli_recovery_hint_without_persisting_settings() {
     let sandbox = Sandbox::new("unknown-rail-hint");
     let mock = Mock::new();
@@ -273,6 +274,7 @@ fn concurrent_commands_keep_every_config_edit_and_one_owner_per_key_name() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn faucet_funding_goes_through_the_rail_plugin_and_its_endpoint() {
     each_rail(Feature::KeysFund, |rail| {
         let mut sandbox = Sandbox::new("fund");
@@ -307,6 +309,7 @@ fn faucet_funding_goes_through_the_rail_plugin_and_its_endpoint() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn invalid_input_fails_before_any_settings_bundle_or_network_access() {
     each_rail(Feature::Transfer, |rail| {
         let net = rail.network;

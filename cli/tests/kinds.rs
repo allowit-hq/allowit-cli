@@ -105,6 +105,7 @@ fn generate_help_explains_every_kind_with_the_sdk_text() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_retired_or_unknown_kind_is_a_usage_error_before_any_access() {
     every_rail(|rail| {
         let net = rail.network;
@@ -137,6 +138,7 @@ fn a_retired_or_unknown_kind_is_a_usage_error_before_any_access() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn an_unset_server_url_is_the_production_server_and_an_untrusted_server_has_its_own_error() {
     every_rail(|rail| {
         let net = rail.network;
@@ -193,6 +195,7 @@ fn an_unset_server_url_is_the_production_server_and_an_untrusted_server_has_its_
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_typed_server_refusal_prints_the_server_code_and_reason() {
     every_rail(|rail| {
         let net = rail.network;
@@ -306,6 +309,7 @@ fn against_stub(
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn policy_kinds_server_lists_what_the_server_accepts_on_the_rail() {
     every_rail(|rail| {
         let net = rail.network;
@@ -353,6 +357,7 @@ fn policy_kinds_server_lists_what_the_server_accepts_on_the_rail() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn policy_kinds_server_refuses_an_invalid_list_and_prints_typed_refusals() {
     every_rail(|rail| {
         let net = rail.network;

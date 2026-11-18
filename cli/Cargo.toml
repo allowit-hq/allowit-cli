@@ -15,6 +15,11 @@ name = "allowit_cli"
 name = "allowit"
 path = "src/main.rs"
 
+[features]
+# Runs the end-to-end tests too: tests that bind a local socket for a fixture server.
+# Without it, `cargo test` runs only the hermetic tests.
+e2e = []
+
 [dependencies]
 allowit-sdk = { workspace = true }
 serde_json_canonicalizer = "0.3"

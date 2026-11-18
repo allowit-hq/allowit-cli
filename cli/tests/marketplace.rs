@@ -127,6 +127,7 @@ fn seller() -> Stub {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn skills_search_ls_and_show_read_the_configured_server_only() {
     let engine = engine("https://seller.example/report".into());
     let mut sandbox = Sandbox::new("skills");
@@ -227,6 +228,7 @@ fn detailed(resource: &str) -> Value {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn filters_reach_the_server_and_show_keeps_observations_apart_from_the_listing() {
     let engine = Stub::new(|_, target| {
         let found = detailed("https://seller.example/report");
@@ -297,6 +299,7 @@ fn filters_reach_the_server_and_show_keeps_observations_apart_from_the_listing()
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_server_entry_with_an_unsafe_resource_is_refused() {
     let engine = engine("javascript:alert(1)".into());
     let mut sandbox = Sandbox::new("skills-unsafe");
@@ -313,6 +316,7 @@ fn a_server_entry_with_an_unsafe_resource_is_refused() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn curl_and_call_return_a_free_resource_without_any_payment_or_engine_request() {
     let seller = seller();
     let engine = engine(format!("{}/free", seller.url));
@@ -365,6 +369,7 @@ fn curl_and_call_return_a_free_resource_without_any_payment_or_engine_request() 
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn a_seller_failure_has_its_own_exit_code_and_pays_nothing() {
     let seller = seller();
     let engine = engine(format!("{}/pay", seller.url));
@@ -500,6 +505,7 @@ fn the_mcp_handshake_and_tool_list_match_the_snapshot() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
 fn mcp_tools_read_the_catalog_and_return_resources_as_bounded_data() {
     let seller = seller();
     let engine = engine(format!("{}/free", seller.url));
