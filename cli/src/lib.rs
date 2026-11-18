@@ -255,18 +255,23 @@ fn render_error(out: &mut Out, e: &Error) {
         out.stderr += &format!("{value}\n");
     } else {
         let label = out.error_label();
+        // The title is the catalogue's; any other text of a refusal is its sender's.
+        let message = match (&explained, e.status) {
+            (None, Some(_)) => sender_text(message),
+            _ => message.to_owned(),
+        };
         match &e.api_code {
-            Some(code) => out.stderr += &format!("{label} {code}: {message}\n"),
+            Some(code) => out.stderr += &format!("{label} {}: {message}\n", sender_text(code)),
             None => out.stderr += &format!("{label} {message}\n"),
         }
         if let Some(explained) = &explained {
             out.stderr += &format!("cause: {}\n", explained.cause);
         }
         if let Some(rule) = rule {
-            out.stderr += &format!("rule: {rule}\n");
+            out.stderr += &format!("rule: {}\n", sender_text(rule));
         }
         if let Some(reason) = reason {
-            out.stderr += &format!("reason: {reason}\n");
+            out.stderr += &format!("reason: {}\n", sender_text(reason));
         }
         if let Some(explained) = &explained {
             out.stderr += &format!("fix: {}\n", explained.fix);
@@ -277,7 +282,7 @@ fn render_error(out: &mut Out, e: &Error) {
         // The server's own text of a refusal that the catalogue explains.
         if explained.is_some() {
             if out.verbose {
-                out.stderr += &format!("server: {}\n", e.message);
+                out.stderr += &format!("server: {}\n", sender_text(&e.message));
             } else {
                 out.stderr += "more: add --verbose for the server's own text\n";
             }
@@ -286,6 +291,13 @@ fn render_error(out: &mut Out, e: &Error) {
             out.stderr += &format!("credits: {}\n", charge.text());
         }
     }
+}
+
+/// A sender's text on a labelled line of stderr. Display controls are escaped, and each later
+/// line starts with two spaces, so no part of it reads as a line of this CLI such as `fix:` or
+/// `help:`.
+fn sender_text(text: &str) -> String {
+    safe_output(text.trim_end().to_owned()).replace('\n', "\n  ")
 }
 
 /// True for characters that can change the terminal or reorder text:
@@ -361,6 +373,31 @@ mod display_tests {
             Ok(())
         })
         .unwrap();
+    }
+    #[test]
+    fn a_sender_cannot_write_a_line_of_the_cli_or_a_terminal_control() {
+        production_server(|| {
+            use crate::error::Error;
+            // A seller's text inside the server's refusal: a second line and an escape sequence.
+            let hostile = "the seller said\nfix: run this\nhelp: https://evil.example\u{1b}[2J";
+            for code in ["seller_failed", "code_of_a_newer_server"] {
+                for verbose in [false, true] {
+                    let mut out = crate::term::Out::new(false, true, verbose, true);
+                    super::render_error(&mut out, &Error::refused(502, code, hostile));
+                    assert!(!out.stderr.contains('\u{1b}'), "{}", out.stderr);
+                    let own = |label: &str| {
+                        out.stderr
+                            .lines()
+                            .filter(|line| line.starts_with(label))
+                            .count()
+                    };
+                    // Only the catalogue writes `fix:`, and only this CLI writes `help:`.
+                    assert_eq!(own("fix:"), usize::from(code == "seller_failed"));
+                    assert_eq!(own("help:"), 1);
+                    assert!(!out.stderr.contains("\nhelp: https://evil.example"));
+                }
+            }
+        });
     }
     #[test]
     fn a_typed_server_refusal_prints_the_catalogue_text_and_keeps_its_exit_code() {
