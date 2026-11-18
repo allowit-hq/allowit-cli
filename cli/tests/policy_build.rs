@@ -1,6 +1,6 @@
 //! `allowit policy build`: the build of a Custom policy's wallet code. The command compiles
-//! nothing before the trusted server key signed the exact source that it received. Every value
-//! comes from the registered rail, so no test names a vendor.
+//! nothing unless the server's source is the source that the owner signed. Every value comes
+//! from the registered rail, so no test names a vendor.
 mod common;
 
 use allowit_sdk::{custom_build, plugins::Feature};
@@ -10,33 +10,13 @@ use serde_json::{Value, json};
 const ID: &str = "Xg7IxRXCr2MhVdRrTFoYKeAw2iV4u463";
 const TICKET: &str = "0123456789abcdef0123456789abcdef";
 
-/// A local key of the rail as the signer of a build statement.
-struct Key {
-    network: &'static str,
-    key: Box<dyn allowit_sdk::portable::vendor::PrivateSigner>,
-}
-impl Key {
-    fn of(rail: &Rail<'_>, seed: u8) -> Self {
-        let keys = rail.plugin.keys();
-        Self {
-            network: rail.network,
-            key: keys.derive(&vec![seed; keys.entropy_bytes()]).unwrap(),
-        }
-    }
-    fn address(&self) -> &str {
-        self.key.address()
-    }
-}
-impl custom_build::Signer for Key {
-    fn network(&self) -> &str {
-        self.network
-    }
-    fn address(&self) -> &str {
-        self.key.address()
-    }
-    fn sign_hash(&self, digest: &[u8]) -> allowit_sdk::error::Result<Vec<u8>> {
-        self.key.sign_hash(digest)
-    }
+/// A public key of the rail, as the server key.
+fn server_key(rail: &Rail<'_>, seed: u8) -> String {
+    let keys = rail.plugin.keys();
+    keys.derive(&vec![seed; keys.entropy_bytes()])
+        .unwrap()
+        .address()
+        .to_owned()
 }
 
 /// The policy source of the CLI template: it passes the policy source gate.
@@ -47,14 +27,12 @@ fn source() -> String {
     .unwrap()
 }
 
-/// The server's build reply for `source`, presigned by `server` for `signed`.
-fn admission(rail: &Rail<'_>, server: &Key, signed: &str, source: &str) -> Value {
+/// The server's build reply for `source`.
+fn admission(rail: &Rail<'_>, source: &str) -> Value {
     json!({
         "policyId": ID,
         "network": rail.network,
-        "owner": Key::of(rail, 2).address(),
         "source": source,
-        "presignature": custom_build::presign(server, ID, signed).unwrap(),
         "build": null,
     })
 }
@@ -108,26 +86,45 @@ fn error(output: &std::process::Output) -> Value {
 }
 
 #[test]
-fn a_build_needs_a_ticket_or_an_owner_key_and_reaches_no_server_without_one() {
-    let sandbox = Sandbox::new("build-usage");
+fn a_build_needs_the_ticket_and_signed_source_hash_or_an_owner_key() {
+    let mut sandbox = Sandbox::new("build-usage");
     let mock = Mock::new();
-    let mut sandbox = sandbox;
     sandbox.set("ALLOWIT_URL", &mock.url);
+    let hash = allowit_sdk::digest(source().as_bytes());
     let output = sandbox.run(&["policy", "build", ID]);
     assert_eq!(code(&output), Some(2), "{}", stderr(&output));
     assert!(stderr(&output).contains("--ticket"), "{}", stderr(&output));
-    let output = sandbox.run(&["policy", "build", "not a policy id", "--ticket", TICKET]);
+    // A ticket needs the signed source hash with it.
+    let output = sandbox.run(&["policy", "build", ID, "--ticket", TICKET]);
+    assert_eq!(code(&output), Some(2), "{}", stderr(&output));
+    let output = sandbox.run(&[
+        "policy",
+        "build",
+        ID,
+        "--ticket",
+        TICKET,
+        "--source-hash",
+        "not a hash",
+    ]);
+    assert_eq!(code(&output), Some(2), "{}", stderr(&output));
+    let output = sandbox.run(&[
+        "policy",
+        "build",
+        "not a policy id",
+        "--ticket",
+        TICKET,
+        "--source-hash",
+        &hash,
+    ]);
     assert_eq!(code(&output), Some(2), "{}", stderr(&output));
     mock.assert_untouched();
 }
 
 #[test]
-fn a_presignature_of_an_untrusted_server_key_stops_the_build_before_it_compiles() {
+fn source_that_the_owner_did_not_sign_stops_the_build_before_it_compiles() {
     each_rail(Feature::CustomBuild, |rail| {
-        let (trusted, untrusted) = (Key::of(rail, 1), Key::of(rail, 3));
-        let source = source();
-        let mut sandbox = Sandbox::new("build-untrusted");
-        // The server signs with another key than the one of the owner's build command.
+        let mut sandbox = Sandbox::new("build-source");
+        let signed = allowit_sdk::digest(b"pub fn execute() { /* the signed source */ }\n");
         let (output, requests) = served(
             &mut sandbox,
             &[
@@ -137,100 +134,22 @@ fn a_presignature_of_an_untrusted_server_key_stops_the_build_before_it_compiles(
                 ID,
                 "--ticket",
                 TICKET,
-                "--server-key",
-                trusted.address(),
+                "--source-hash",
+                &signed,
             ],
-            vec![
-                (200, admission(rail, &untrusted, &source, &source)),
-                (200, json!({})),
-            ],
-        );
-        assert_eq!(code(&output), Some(2), "{}", stderr(&output));
-        assert_eq!(
-            error(&output)["error"]["api_code"],
-            custom_build::code::PRESIGNATURE_MISMATCH
-        );
-        // Only the read arrived: no code was built or handed over.
-        assert_eq!(
-            requests,
-            [format!(
-                "GET /api/custom/build?id={ID}&ticket={TICKET} HTTP/1.1"
-            )]
-        );
-        assert!(!sandbox.config().join("custom-build").exists());
-    });
-}
-
-#[test]
-fn source_that_the_server_did_not_presign_stops_the_build_before_it_compiles() {
-    each_rail(Feature::CustomBuild, |rail| {
-        let server = Key::of(rail, 1);
-        let source = source();
-        let altered = format!("{source}// altered\n");
-        let mut sandbox = Sandbox::new("build-altered");
-        let (output, requests) = served(
-            &mut sandbox,
-            &[
-                "--json",
-                "policy",
-                "build",
-                ID,
-                "--ticket",
-                TICKET,
-                "--server-key",
-                server.address(),
-            ],
-            vec![
-                (200, admission(rail, &server, &source, &altered)),
-                (200, json!({})),
-            ],
-        );
-        assert_eq!(code(&output), Some(2), "{}", stderr(&output));
-        assert_eq!(
-            error(&output)["error"]["api_code"],
-            custom_build::code::PRESIGNATURE_MISMATCH
-        );
-        assert_eq!(requests.len(), 1);
-        assert!(!sandbox.config().join("custom-build").exists());
-    });
-}
-
-#[test]
-fn the_server_key_of_the_command_must_equal_the_pinned_key() {
-    each_rail(Feature::CustomBuild, |rail| {
-        let (pinned, other) = (Key::of(rail, 1), Key::of(rail, 3));
-        let source = source();
-        let mut sandbox = Sandbox::new("build-pinned");
-        let mock = Mock::new();
-        sandbox.set("ALLOWIT_URL", &mock.url);
-        sandbox.ok(&[
-            "--rail",
-            rail.network,
-            "rail",
-            "trust",
-            &mock.url,
-            pinned.address(),
-        ]);
-        // The command names another key than the one that `rail trust` pinned for this server.
-        let (output, _) = served_by(
-            mock,
-            &mut sandbox,
-            &[
-                "policy",
-                "build",
-                ID,
-                "--ticket",
-                TICKET,
-                "--server-key",
-                other.address(),
-            ],
-            vec![(200, admission(rail, &other, &source, &source))],
+            vec![(200, admission(rail, &source())), (200, json!({}))],
         );
         assert_eq!(code(&output), Some(3), "{}", stderr(&output));
         assert!(
-            stderr(&output).contains("--server-key differs"),
+            stderr(&output).contains("differs from the source that the owner signed"),
             "{}",
             stderr(&output)
+        );
+        // The source was read; nothing was built or handed over.
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        assert!(
+            requests[0].starts_with("GET /api/custom/build?"),
+            "{requests:?}"
         );
         assert!(!sandbox.config().join("custom-build").exists());
     });
@@ -239,13 +158,13 @@ fn the_server_key_of_the_command_must_equal_the_pinned_key() {
 #[test]
 fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
     each_rail(Feature::CustomBuild, |rail| {
-        let server = Key::of(rail, 1);
         let source = source();
         let mut sandbox = Sandbox::new("build-toolchain");
         // No build tool is on this PATH.
         let empty = sandbox.work().join("no-tools");
         std::fs::create_dir_all(&empty).unwrap();
         sandbox.set("PATH", &empty);
+        let hash = allowit_sdk::digest(source.as_bytes());
         let (output, requests) = served(
             &mut sandbox,
             &[
@@ -255,13 +174,10 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
                 ID,
                 "--ticket",
                 TICKET,
-                "--server-key",
-                server.address(),
+                "--source-hash",
+                &hash,
             ],
-            vec![
-                (200, admission(rail, &server, &source, &source)),
-                (200, json!({})),
-            ],
+            vec![(200, admission(rail, &source)), (200, json!({}))],
         );
         assert_eq!(code(&output), Some(2), "{}", stderr(&output));
         let error = error(&output);
@@ -283,9 +199,47 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
 }
 
 #[test]
+fn the_server_key_of_the_command_must_equal_the_pinned_key() {
+    each_rail(Feature::CustomBuild, |rail| {
+        let (pinned, other) = (server_key(rail, 1), server_key(rail, 3));
+        let mut sandbox = Sandbox::new("build-pinned");
+        let mock = Mock::new();
+        sandbox.set("ALLOWIT_URL", &mock.url);
+        sandbox.ok(&["--rail", rail.network, "rail", "use", rail.network]);
+        sandbox.ok(&["--rail", rail.network, "rail", "trust", &mock.url, &pinned]);
+        sandbox.ok(&["keys", "generate", "owner"]);
+        // The command names another key than the one that `rail trust` pinned for this server.
+        let (output, requests) = served_by(
+            mock,
+            &mut sandbox,
+            &[
+                "policy",
+                "build",
+                ID,
+                "--owner-key",
+                "owner",
+                "--origin",
+                "http://localhost:5173",
+                "--server-key",
+                &other,
+            ],
+            vec![(503, json!({"error": "unavailable"}))],
+        );
+        assert_eq!(code(&output), Some(3), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("--server-key differs"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(requests.is_empty(), "{requests:?}");
+        assert!(!sandbox.config().join("custom-build").exists());
+    });
+}
+
+#[test]
 fn an_owner_key_with_the_server_key_of_the_command_needs_no_pinned_key() {
     each_rail(Feature::CustomBuild, |rail| {
-        let server = Key::of(rail, 1);
+        let server = server_key(rail, 1);
         let mut sandbox = Sandbox::new("build-owner-key");
         sandbox.ok(&["--rail", rail.network, "rail", "use", rail.network]);
         sandbox.ok(&["keys", "generate", "owner"]);
@@ -301,7 +255,7 @@ fn an_owner_key_with_the_server_key_of_the_command_needs_no_pinned_key() {
                 "--origin",
                 "http://localhost:5173",
                 "--server-key",
-                server.address(),
+                &server,
             ],
             vec![(503, json!({"error": "unavailable"}))],
         );
