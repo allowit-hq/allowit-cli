@@ -19,6 +19,8 @@ Commands:
   status      Read a request's state. The local journal supplies its rail and wallet; --rail and
               --wallet are the fallback
   history     List recent requests from the local journal
+  price       Read a price now: what one share of a vault pays, with the wallet's shares and their
+              worth, or what selling an amount of one asset for another pays
   skills      Find paid services in the server's marketplace catalog
   call        Call a paid service from the catalog or by URL: pay what the seller asks, within the
               policy, and print the resource

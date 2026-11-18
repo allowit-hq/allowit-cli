@@ -56,6 +56,7 @@ mod tests {
             "allowit exec --op transfer",
             "allowit status ID --wait 60s",
             "allowit history",
+            "allowit price VAULT",
             "- 20: the policy denied the request",
             "the owner's instructions as the owner wrote them",
             "start when the owner tells you to, or at once when the owner's instructions",

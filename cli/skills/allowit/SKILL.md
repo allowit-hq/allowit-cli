@@ -13,7 +13,7 @@ The owner's policy wallet holds the funds. Your key signs requests. The policy d
 3. Key, when help says "awaiting agent key": `allowit rail use <rail>`, `allowit keys generate agent`, `allowit keys use agent`. Give the owner the printed `address`. Wait until the owner has signed. Run help again.
 4. Import: help prints the server key; the owner sees the same key in the app under Agent access. Then `allowit wallet import --policy POLICY_ID` pins it and `allowit wallet use WALLET`. A server that later names another key is refused.
 5. Work: start when the owner tells you to, or at once when the owner's instructions already say what to do. Ask the owner when a request disagrees with them. Pay with `allowit exec --op transfer --to DESTINATION --amount ASSET:AMOUNT --request-id ID`. Use one new ID for each payment.
-6. Check: `allowit status ID --wait 60s`. List: `allowit history`. Limits: `allowit wallet show`.
+6. Check: `allowit status ID --wait 60s`. List: `allowit history`. Limits: `allowit wallet show`. A vault's share price and your shares: `allowit price VAULT`.
 
 Exit codes:
 
