@@ -36,6 +36,11 @@ pub(crate) fn help(error: &Error) -> Option<String> {
         .filter(|code| errors::is_code(code))?;
     let origin =
         crate::config::parse_origin(crate::config::env_value("ALLOWIT_URL").trim()).ok()?;
+    // A URL parser drops a tab or a line break inside the authority; the link prints as it is,
+    // so such an origin gives no link.
+    if !origin.bytes().all(|b| b.is_ascii_graphic()) {
+        return None;
+    }
     Some(errors::help_url(&origin, code))
 }
 
@@ -121,5 +126,21 @@ mod tests {
             assert!(help(&Error::api(500, "x")).is_none());
             assert!(explained(&Error::api(500, "x")).is_none());
         });
+    }
+
+    #[test]
+    fn an_origin_with_a_line_break_gives_no_help_link() {
+        for origin in [
+            "https://app\n.example",
+            "https://app\t.example",
+            "https://app.ex\rample",
+        ] {
+            crate::config::with_settings(&[("ALLOWIT_URL", origin.to_owned())], || {
+                let denied = Error::refused(409, "policy_denied", "x");
+                assert_eq!(help(&denied), None, "{origin:?}");
+                Ok(())
+            })
+            .unwrap();
+        }
     }
 }

@@ -220,9 +220,12 @@ fn tool_error(
     if let Some(charge) = &charge {
         summary.push_str(&format!(". Credits: {}", charge.text()));
     }
+    // A client that reads only `content` gets the whole error too, as `tool_result` gives a value.
+    let error = json!({"error": detail});
+    let text = serde_json::to_string(&error).unwrap_or_default();
     json!({
-        "content": [{"type": "text", "text": summary}],
-        "structuredContent": {"error": detail},
+        "content": [{"type": "text", "text": summary}, {"type": "text", "text": text}],
+        "structuredContent": error,
         "isError": true
     })
 }
@@ -879,6 +882,15 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("policy_denied")
+        );
+        // A client that reads only `content` reads the reason and the server's text there too.
+        let whole: Value =
+            serde_json::from_str(result["content"][1]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(whole, result["structuredContent"]);
+        assert_eq!(whole["error"]["reason"], "destinations");
+        assert_eq!(
+            whole["error"]["detail"],
+            "Allowit returned HTTP 409: DestinationNotAllowed"
         );
         // A price above the bound and a seller failure keep their own codes.
         // A refusal that names credits tells the agent the cause and what the owner must do,

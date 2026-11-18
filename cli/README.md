@@ -419,7 +419,7 @@ cause: The request breaks a rule of the policy, such as an amount limit, a recip
 rule: payment_limit
 fix: Do not retry the same request. Read the limits with allowit POLICY_ID help. Tell the owner which rule denied it.
 help: https://app.allowit.ai/help/policy_denied
-more: add --verbose for the server's own text
+more: HTTP 409; add --verbose for the server's own text
 ```
 
 - `help:` is the page of the code on the `ALLOWIT_URL` origin. It shows the fix as numbered steps with pictures.

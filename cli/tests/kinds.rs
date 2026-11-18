@@ -286,7 +286,8 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
                 // The server's own text prints only with --verbose.
                 assert!(!text.contains(&refused), "{text}");
                 assert!(
-                    text.ends_with("more: add --verbose for the server's own text\n"),
+                    text.ends_with("; add --verbose for the server's own text\n")
+                        && text.contains("\nmore: HTTP "),
                     "{text}"
                 );
             }

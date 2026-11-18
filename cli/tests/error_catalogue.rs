@@ -3,9 +3,10 @@
 //! page for a code, so a code without an entry would print as raw text only.
 //!
 //! The test reads the CLI's source. A code is: the code argument of a refusal that the CLI makes
-//! (`refused(status, "code", …)`, `refused("code", …)`, `api_code = Some("code".into())`), a code
-//! that the CLI compares a refusal with (`Some("code")`, `["code"] == "code"`), and a string
-//! constant with a code-like value. A constant that is no error code is in `NOT_CODES`.
+//! (`refused(status, "code", …)` with any status expression, `refused("code", …)`,
+//! `api_code = Some("code".into())`), a code that the CLI compares a refusal with (each word of
+//! `Some("code" | "other_code")`, `["code"] == "code"`), and a string constant with a code-like
+//! value. A constant that is no error code is in `NOT_CODES`.
 use allowit_sdk::errors;
 use regex::Regex;
 use std::collections::BTreeMap;
@@ -36,6 +37,64 @@ fn sources(dir: &Path, out: &mut Vec<(String, String)>) {
     }
 }
 
+/// The typed codes that `text` names, by the forms in the module's doc.
+fn codes_in(text: &str) -> Vec<String> {
+    // A code-like word: lowercase words joined by underscores.
+    let code = r#""([a-z][a-z0-9]*(?:_[a-z0-9]+)+)""#;
+    // Any word of a code's form, where only a code can stand.
+    let any = r#""([a-z][a-z0-9_]{2,63})""#;
+    let forms = [
+        // A refusal that the CLI makes, with or without an HTTP status, which may be a call.
+        format!(r#"refused\(\s*(?:[^,()"]+(?:\([^()]*\))?\s*,\s*)?{any}"#),
+        format!(r"api_code\s*=\s*Some\(\s*{any}"),
+        // A code that the CLI compares a refusal with.
+        format!(r#"\["code"\]\s*==\s*{any}"#),
+        // A string constant with a code-like value.
+        format!(r"const [A-Z][A-Z0-9_]*: &str =\s*{code}"),
+    ]
+    .map(|form| Regex::new(&form).unwrap());
+    // A code that the CLI compares a refusal with: every literal of `Some("a" | "b")`.
+    let alternation = Regex::new(r#"Some\(\s*("[^"]*"(?:\s*\|\s*"[^"]*")*)\s*\)"#).unwrap();
+    let literal = Regex::new(code).unwrap();
+    let mut out = Vec::new();
+    for form in &forms {
+        out.extend(form.captures_iter(text).map(|c| c[1].to_owned()));
+    }
+    for capture in alternation.captures_iter(text) {
+        out.extend(literal.captures_iter(&capture[1]).map(|c| c[1].to_owned()));
+    }
+    out
+}
+
+#[test]
+fn the_scan_reads_every_form_of_a_code() {
+    let text = r#"
+        matches!(code, Some("app_origin_required" | "second_word"))
+        Error::refused(409, "single", "text")
+        Error::refused(status_of(reply), "after_a_call", "text")
+        refused("no_status", "text")
+        error.api_code = Some("set_code".into());
+        if reply["code"] == "compared" {}
+        const NAMED: &str = "named_code";
+        let text = Some("Not a code");
+    "#;
+    let mut found = codes_in(text);
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            "after_a_call",
+            "app_origin_required",
+            "compared",
+            "named_code",
+            "no_status",
+            "second_word",
+            "set_code",
+            "single"
+        ]
+    );
+}
+
 #[test]
 fn every_typed_code_that_the_cli_names_has_a_catalogue_entry() {
     let mut files = Vec::new();
@@ -44,26 +103,10 @@ fn every_typed_code_that_the_cli_names_has_a_catalogue_entry() {
         &mut files,
     );
     assert!(files.len() > 30);
-    let code = r#""([a-z][a-z0-9]*(?:_[a-z0-9]+)+)""#;
-    let forms = [
-        // A refusal that the CLI makes, with or without an HTTP status.
-        format!(r"refused\(\s*(?:[A-Za-z0-9_.]+\s*,\s*)?{code}"),
-        format!(r"api_code\s*=\s*Some\(\s*{code}"),
-        // A code that the CLI compares a refusal with.
-        format!(r"Some\(\s*{code}\s*(?:\||\))"),
-        format!(r#"\["code"\]\s*==\s*{code}"#),
-        // A string constant with a code-like value.
-        format!(r"const [A-Z][A-Z0-9_]*: &str =\s*{code}"),
-    ]
-    .map(|form| Regex::new(&form).unwrap());
     let mut found: BTreeMap<String, String> = BTreeMap::new();
     for (file, text) in &files {
-        for form in &forms {
-            for capture in form.captures_iter(text) {
-                found
-                    .entry(capture[1].to_owned())
-                    .or_insert_with(|| file.clone());
-            }
+        for code in codes_in(text) {
+            found.entry(code).or_insert_with(|| file.clone());
         }
     }
     // The codes that the CLI is known to name: the scan found them.
@@ -81,6 +124,8 @@ fn every_typed_code_that_the_cli_names_has_a_catalogue_entry() {
         "evaluation_running",
         "credits_unavailable",
         "challenge_already_paid",
+        // The second word of an alternation: `Some("app_origin_required" | "method_not_allowed")`.
+        "method_not_allowed",
     ] {
         assert!(
             found.contains_key(expected),

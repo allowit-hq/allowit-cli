@@ -235,6 +235,9 @@ fn render_error(out: &mut Out, e: &Error) {
         if let Some(code) = &e.api_code {
             value["error"]["api_code"] = code.as_str().into();
         }
+        if let Some(status) = e.status {
+            value["error"]["status"] = status.into();
+        }
         if let Some(rule) = rule {
             value["error"]["rule"] = rule.into();
         }
@@ -284,7 +287,14 @@ fn render_error(out: &mut Out, e: &Error) {
             if out.verbose {
                 out.stderr += &format!("server: {}\n", sender_text(&e.message));
             } else {
-                out.stderr += "more: add --verbose for the server's own text\n";
+                match e.status {
+                    Some(status) => {
+                        out.stderr += &format!(
+                            "more: HTTP {status}; add --verbose for the server's own text\n"
+                        )
+                    }
+                    None => out.stderr += "more: add --verbose for the server's own text\n",
+                }
             }
         }
         if let Some(charge) = &charge {
@@ -423,7 +433,7 @@ mod display_tests {
                 assert_eq!(
                     out.stderr,
                     format!(
-                        "error: {code}: {}\ncause: {}\nfix: {}\nhelp: {help}\nmore: add --verbose for the server's own text\n",
+                        "error: {code}: {}\ncause: {}\nfix: {}\nhelp: {help}\nmore: HTTP {status}; add --verbose for the server's own text\n",
                         entry.title,
                         entry.cause,
                         entry.agent_next()
@@ -447,7 +457,7 @@ mod display_tests {
                 assert_eq!(
                     value,
                     serde_json::json!({"error": {
-                        "code": "rejected", "exit": exit, "api_code": code,
+                        "code": "rejected", "exit": exit, "api_code": code, "status": status,
                         "message": entry.title, "cause": entry.cause, "fix": entry.agent_next(),
                         "help": help,
                         "detail": format!("Allowit returned HTTP {status}: the server's reason"),
@@ -528,14 +538,19 @@ mod display_tests {
             assert_eq!(refused.code, 4);
             let mut out = crate::term::Out::new(false, true, false, true);
             super::render_error(&mut out, &refused);
+            let entry = allowit_sdk::errors::entry("credits_exhausted").unwrap();
             assert_eq!(
                 out.stderr,
-                "error: credits_exhausted: No credits are left\n\
-             cause: Allowit charges the policy's owner credits for each request that it evaluates, and the owner has none left. Allowit refused this request before it evaluated the policy: nothing was signed, sent or charged.\n\
-             fix: Tell the owner to get credits from Allowit: the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.\n\
-             help: https://app.allowit.ai/help/credits_exhausted\n\
-             more: add --verbose for the server's own text\n"
+                format!(
+                    "error: credits_exhausted: {}\ncause: {}\nfix: {}\n\
+                     help: https://app.allowit.ai/help/credits_exhausted\n\
+                     more: HTTP 402; add --verbose for the server's own text\n",
+                    entry.title,
+                    entry.cause,
+                    entry.agent_next()
+                )
             );
+            assert!(entry.cause.contains("nothing was signed, sent or charged"));
             let mut out = crate::term::Out::new(true, true, false, true);
             out.request_id = Some("pay-0001".into());
             super::render_error(&mut out, &refused);
