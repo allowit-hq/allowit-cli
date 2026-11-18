@@ -179,7 +179,7 @@ mod tests {
         let seen = json!({
             "price": "9400000", "depth": "10000000", "tradeAverage": "0", "trades": 0,
             "observedAt": 1_795_003_303u64, "source": "CVAULT preview_redeem at ledger 5795931",
-            "vault": {"asset": "CASSET", "assetCode": "XLM", "shareDecimals": 7,
+            "vault": {"asset": "CASSET", "assetCode": "COIN", "shareDecimals": 7,
                 "shares": "10000000", "paid": "9400000", "held": "1000000000", "heldValue": "940000000"}
         });
         let text: Vec<String> = rows("CVAULT", None, &seen)
@@ -190,8 +190,8 @@ mod tests {
             text,
             [
                 "vault CVAULT",
-                "price 1 share = 0.94 XLM",
-                "position 100 shares, worth 94 XLM",
+                "price 1 share = 0.94 COIN",
+                "position 100 shares, worth 94 COIN",
                 "seen 2026-11-18T12:01:43Z (CVAULT preview_redeem at ledger 5795931)",
             ]
         );
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(text[1], "price 1 share = 0.96 CASSET");
         assert_eq!(text[2], "redeem 5 shares pay 4.8 CASSET");
         let market = json!({"price": "1234567", "depth": "50000000", "tradeAverage": "1200000",
-            "trades": 3, "observedAt": 0, "source": "horizon-testnet.stellar.org ledger 1"});
+            "trades": 3, "observedAt": 0, "source": "market.example ledger 1"});
         let text: Vec<String> = rows("native", Some("USDC"), &market)
             .into_iter()
             .map(|r| r.join(" "))
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(text[2], "trades 0.12 USDC on average over 3 recent trades");
         assert_eq!(
             text[3],
-            "seen 1970-01-01T00:00:00Z (horizon-testnet.stellar.org ledger 1)"
+            "seen 1970-01-01T00:00:00Z (market.example ledger 1)"
         );
         assert_eq!(
             when(&json!({"observedAt": 951_782_400})),
