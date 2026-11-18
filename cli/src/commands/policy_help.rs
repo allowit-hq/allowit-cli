@@ -644,7 +644,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         }
     }
     let rules = [
-        "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and the commands above are examples: run no test payment.",
+        "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed payment is an example: run no test payment.",
         "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.",
         "Pay only with `allowit exec`: it pays from the policy wallet.",
         "Exit 20 means the policy denied the request. Do not retry, split or work around it. Tell the owner the rule that the error names.",
