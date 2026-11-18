@@ -6,6 +6,7 @@ mod generate;
 mod kinds;
 mod owner;
 mod params;
+mod rate;
 mod show;
 use crate::{ctx::Ctx, error::Result};
 pub(crate) use check::EXAMPLES as CHECK_EXAMPLES;
@@ -44,6 +45,8 @@ pub(crate) enum Command {
     Show(show::Args),
     #[command(before_help=check::EXAMPLES)]
     Check(check::Args),
+    #[command(before_help=rate::EXAMPLES)]
+    Rate(rate::Args),
 }
 pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
     match command {
@@ -62,6 +65,7 @@ pub(crate) fn run(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Generate(a) => generate::run(a, cx),
         Command::Show(a) => show::run(a, cx),
         Command::Check(a) => check::run(a, cx),
+        Command::Rate(a) => rate::run(a, cx),
     }
 }
 pub(crate) fn is_local(command: &Command) -> bool {

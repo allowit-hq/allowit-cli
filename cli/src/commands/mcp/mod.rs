@@ -94,14 +94,17 @@ fn tools() -> Value {
     json!([
         {
             "name": "marketplace_search",
-            "description": "Search the marketplace catalog of the configured Allowit server for paid services. Free. Listed prices are indicative; the seller states the price when called.",
+            "description": "Search the marketplace catalog of the configured Allowit server for paid services. Free. Listed prices are indicative; the seller states the price when called. Each entry keeps the seller's listing apart from what Allowit observed and from owners' reputation labels.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "What the service should do. Empty lists the catalog."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                     "cursor": {"type": "string", "description": "nextCursor of the previous page"},
-                    "all_rails": {"type": "boolean", "description": "Include entries of every rail, not only of the selected one"}
+                    "all_rails": {"type": "boolean", "description": "Include entries of every rail, not only of the selected one"},
+                    "capability": {"type": "string", "description": "Keep entries whose listing names this capability, such as finance"},
+                    "access": {"type": "string", "enum": ["payment", "free", "free_quota", "signature", "proof_of_work"], "description": "Keep entries that offer this way to get them"},
+                    "asset": {"type": "string", "description": "Keep entries that accept this asset reference"}
                 },
                 "required": ["query"],
                 "additionalProperties": false
@@ -109,7 +112,7 @@ fn tools() -> Value {
         },
         {
             "name": "marketplace_show",
-            "description": "Read one marketplace catalog entry by its id: resource URL, methods and indicative terms. Free.",
+            "description": "Read one marketplace catalog entry by its id: resource URL, methods, indicative terms, access, what Allowit observed and reputation labels. Free.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "string"}},
@@ -428,12 +431,39 @@ fn paid_call(
 fn call_tool(global: &Global, name: &str, arguments: &Value) -> std::result::Result<Value, String> {
     match name {
         "marketplace_search" => {
-            let args = Arguments::new(arguments, &["query", "limit", "cursor", "all_rails"])?;
+            let args = Arguments::new(
+                arguments,
+                &[
+                    "query",
+                    "limit",
+                    "cursor",
+                    "all_rails",
+                    "capability",
+                    "access",
+                    "asset",
+                ],
+            )?;
             let query = args.required("query", 256)?;
+            let access = match args.text("access", 32)?.as_deref() {
+                None => None,
+                Some("payment") => Some(skills::Access::Payment),
+                Some("free") => Some(skills::Access::Free),
+                Some("free_quota") => Some(skills::Access::FreeQuota),
+                Some("signature") => Some(skills::Access::Signature),
+                Some("proof_of_work") => Some(skills::Access::ProofOfWork),
+                Some(_) => {
+                    return Err(
+                        "access is payment, free, free_quota, signature or proof_of_work".into(),
+                    );
+                }
+            };
             let page = skills::PageArgs {
                 limit: args.integer("limit", 1, 50)?.map(|n| n as usize),
                 cursor: args.text("cursor", 128)?,
                 all_rails: args.flag("all_rails")?,
+                capability: args.text("capability", 64)?,
+                access,
+                asset: args.text("asset", 128)?,
             };
             let mut cx = context(global);
             Ok(

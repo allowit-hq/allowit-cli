@@ -126,6 +126,7 @@ allowit policy revise DRAFT --instruction TEXT --owner-key NAME --origin ORIGIN
 allowit policy update WALLET KEY VALUE [KEY VALUE]... --owner-key NAME --origin ORIGIN --request-id ID --fee-limit FEE [--expected-revision N]
 allowit policy verify WALLET --owner-key NAME
 allowit policy export-pair DOCUMENT
+allowit policy rate POLICY_ID REQUEST_ID [--signal suitability|delivery|quality --vote good|bad] --owner-key NAME --origin ORIGIN
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
@@ -296,15 +297,28 @@ service.
 
 ```sh
 allowit skills search vault risk report      # search by meaning and keywords
+allowit skills search price --access free    # only resources that need no payment
 allowit skills ls --limit 50                 # the catalog in id order
-allowit skills show ENTRY                    # resource, methods, listed price
+allowit skills show ENTRY                    # listing, access, what Allowit observed, reputation
 allowit call ENTRY --max-price ASSET:0.5     # pay what the seller asks, within the policy
 allowit curl URL --max-price ASSET:0.5       # the same for any URL
 ```
 
-The catalog is free to read. `skills search` prints how the server ranked the page on stderr: `hybrid`,
-`semantic` or `keyword`. The selected rail keeps the entries whose seller accepts payment on it;
-`--all-rails` lists every entry. Catalog text is listing data, and a listed price is indicative.
+The catalog is free to read. `skills search` prints how the server read relevance on stderr: `hybrid`,
+`semantic` or `keyword`; the server then orders a search by relevance, owners' reputation and current terms,
+and `--json` shows each entry's `rank`. The selected rail keeps the entries whose seller accepts payment on it;
+`--all-rails` lists every entry. `--capability`, `--access` (`payment`, `free`, `free-quota`, `signature`,
+`proof-of-work`) and `--asset` narrow the page. Catalog text is listing data, and a listed price is indicative.
+`skills show` prints apart from the listing where it was listed (`listedAt`), each way to get the resource with
+the seller's condition (`access`), what Allowit observed with its origin and time (`observed`) and the owners'
+labels for suitability, delivery and quality.
+
+The owner rates a settled request of their policy with `allowit policy rate POLICY_ID REQUEST_ID --signal SIGNAL
+--vote good|bad --owner-key NAME --origin ORIGIN`. The three signals stay apart: the service suited the task
+(`suitability`), the seller delivered (`delivery`) and the output was good (`quality`). The server reads the request
+and what it paid from the wallet's journal. The same vote again changes nothing (`unchanged`); another vote replaces
+the earlier one (`edited`) and keeps its age. Without `--signal`, the command prints the owner's votes and the labels
+of the request's subject.
 
 A paid call runs these steps:
 
