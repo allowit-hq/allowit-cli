@@ -24,6 +24,8 @@ libc = "0.2.190"
 regex = "1.11.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0.143", features = ["raw_value", "arbitrary_precision"] }
+# Reads the literal decision questions of a source, with the features that the SDK enables.
+syn = { version = "2", features = ["full", "visit"] }
 syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy", "parsing"] }
 toml = "0.9"
 zeroize = "1.8.2"

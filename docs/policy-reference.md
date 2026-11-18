@@ -49,6 +49,7 @@ allowit policy show --source
 ```
 
 `check` validates the source structure and prints its SHA-256 digest, leading canonical rule calls, whether the source is canonical-only and whether it writes state.
+It warns when a literal decision question asks an amount, an address, a price or a date, which a rule checks exactly. The patterns are a fixed English list in [`details.rs`](../cli/src/commands/policy/details.rs), with what they catch and miss.
 `check --compile` also type-checks the source with rustc against the exact embedded portable Std library. Compilation has wall-time and output limits. Neither form authorizes a transaction or establishes settlement.
 The [policy template](../cli/templates/policy/) type-checks authored source as an ordinary Rust crate.
 
