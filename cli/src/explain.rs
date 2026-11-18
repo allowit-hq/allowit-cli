@@ -43,16 +43,34 @@ pub(crate) fn help(error: &Error) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Runs `f` with `https://allowit.example` as the server, whatever `ALLOWIT_URL` the process
+    /// has: a help page is on the origin of the server.
+    fn at_example(f: impl FnOnce()) {
+        crate::config::with_settings(
+            &[("ALLOWIT_URL", "https://allowit.example".to_owned())],
+            || {
+                f();
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
     #[test]
     fn a_server_refusal_with_a_catalogue_code_has_a_cause_a_fix_and_a_help_page() {
-        let denied = Error::refused(409, "policy_denied", "The policy denied this operation.");
-        let text = explained(&denied).unwrap();
-        let entry = errors::entry("policy_denied").unwrap();
-        assert_eq!(text.title, entry.title);
-        assert_eq!(text.cause, entry.cause);
-        // The terminal reader is the agent: it gets the agent's next step.
-        assert_eq!(text.fix, entry.agent.as_deref().unwrap());
-        assert!(help(&denied).unwrap().ends_with("/help/policy_denied"));
+        at_example(|| {
+            let denied = Error::refused(409, "policy_denied", "The policy denied this operation.");
+            let text = explained(&denied).unwrap();
+            let entry = errors::entry("policy_denied").unwrap();
+            assert_eq!(text.title, entry.title);
+            assert_eq!(text.cause, entry.cause);
+            // The terminal reader is the agent: it gets the agent's next step.
+            assert_eq!(text.fix, entry.agent.as_deref().unwrap());
+            assert_eq!(
+                help(&denied).as_deref(),
+                Some("https://allowit.example/help/policy_denied")
+            );
+        });
     }
 
     #[test]
@@ -84,22 +102,24 @@ mod tests {
 
     #[test]
     fn a_local_check_and_an_unknown_code_keep_their_own_text() {
-        // A check of this CLI before it signs: no HTTP status.
-        let mut local = Error::config("policy p now pays from wallet A, not from B.");
-        local.api_code = Some("wallet_differs".into());
-        assert!(explained(&local).is_none());
-        assert!(help(&local).unwrap().ends_with("/help/wallet_differs"));
-        // A newer server's code has no entry yet and still has a help page.
-        let newer = Error::refused(409, "code_of_a_newer_server", "x");
-        assert!(explained(&newer).is_none());
-        assert!(
-            help(&newer)
-                .unwrap()
-                .ends_with("/help/code_of_a_newer_server")
-        );
-        // Text that is no code, and an untyped error, have no page.
-        assert!(help(&Error::refused(409, "Not A Code", "x")).is_none());
-        assert!(help(&Error::api(500, "x")).is_none());
-        assert!(explained(&Error::api(500, "x")).is_none());
+        at_example(|| {
+            // A check of this CLI before it signs: no HTTP status.
+            let mut local = Error::config("policy p now pays from wallet A, not from B.");
+            local.api_code = Some("wallet_differs".into());
+            assert!(explained(&local).is_none());
+            assert!(help(&local).unwrap().ends_with("/help/wallet_differs"));
+            // A newer server's code has no entry yet and still has a help page.
+            let newer = Error::refused(409, "code_of_a_newer_server", "x");
+            assert!(explained(&newer).is_none());
+            assert!(
+                help(&newer)
+                    .unwrap()
+                    .ends_with("/help/code_of_a_newer_server")
+            );
+            // Text that is no code, and an untyped error, have no page.
+            assert!(help(&Error::refused(409, "Not A Code", "x")).is_none());
+            assert!(help(&Error::api(500, "x")).is_none());
+            assert!(explained(&Error::api(500, "x")).is_none());
+        });
     }
 }

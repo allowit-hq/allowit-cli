@@ -353,172 +353,187 @@ mod display_tests {
         );
         assert_eq!(super::safe_output("plain\n".into()), "plain\n");
     }
+    /// Runs `f` with the production server selected, whatever `ALLOWIT_URL` the process has:
+    /// a help page is on the origin of the server.
+    fn production_server(f: impl FnOnce()) {
+        crate::config::with_settings(&[("ALLOWIT_URL", String::new())], || {
+            f();
+            Ok(())
+        })
+        .unwrap();
+    }
     #[test]
     fn a_typed_server_refusal_prints_the_catalogue_text_and_keeps_its_exit_code() {
-        use crate::error::Error;
-        use allowit_sdk::errors;
-        // (HTTP status, server code, exit code): typed refusals are final,
-        // a pending transaction is uncertain and an unavailable network retries.
-        for (status, code, exit) in [
-            (400, "wallet_kind_unsupported", 4),
-            (400, "wallet_kind_unknown", 4),
-            (409, "owner_transaction_expired", 4),
-            (409, "owner_transaction_settled", 4),
-        ] {
-            let error = Error::refused(status, code, "the server's reason");
-            assert_eq!(error.code, exit, "{code}");
-            let entry = errors::entry(code).unwrap();
-            let help = format!("https://app.allowit.ai/help/{code}");
-            // The title, the cause, what to do and the help page. The server's own text is not
-            // printed without --verbose.
-            let mut out = crate::term::Out::new(false, true, false, true);
-            super::render_error(&mut out, &error);
-            assert_eq!(
-                out.stderr,
-                format!(
-                    "error: {code}: {}\ncause: {}\nfix: {}\nhelp: {help}\nmore: add --verbose for the server's own text\n",
-                    entry.title,
-                    entry.cause,
-                    entry.agent_next()
-                )
-            );
-            let mut out = crate::term::Out::new(false, true, true, true);
-            super::render_error(&mut out, &error);
-            assert!(
+        production_server(|| {
+            use crate::error::Error;
+            use allowit_sdk::errors;
+            // (HTTP status, server code, exit code): typed refusals are final,
+            // a pending transaction is uncertain and an unavailable network retries.
+            for (status, code, exit) in [
+                (400, "wallet_kind_unsupported", 4),
+                (400, "wallet_kind_unknown", 4),
+                (409, "owner_transaction_expired", 4),
+                (409, "owner_transaction_settled", 4),
+            ] {
+                let error = Error::refused(status, code, "the server's reason");
+                assert_eq!(error.code, exit, "{code}");
+                let entry = errors::entry(code).unwrap();
+                let help = format!("https://app.allowit.ai/help/{code}");
+                // The title, the cause, what to do and the help page. The server's own text is not
+                // printed without --verbose.
+                let mut out = crate::term::Out::new(false, true, false, true);
+                super::render_error(&mut out, &error);
+                assert_eq!(
+                    out.stderr,
+                    format!(
+                        "error: {code}: {}\ncause: {}\nfix: {}\nhelp: {help}\nmore: add --verbose for the server's own text\n",
+                        entry.title,
+                        entry.cause,
+                        entry.agent_next()
+                    )
+                );
+                let mut out = crate::term::Out::new(false, true, true, true);
+                super::render_error(&mut out, &error);
+                assert!(
                 out.stderr.ends_with(&format!(
                     "help: {help}\nserver: Allowit returned HTTP {status}: the server's reason\n"
                 )),
                 "{}",
                 out.stderr
             );
-            assert!(!out.stderr.contains("more: "));
-            // JSON always holds the server's text, as `detail`.
+                assert!(!out.stderr.contains("more: "));
+                // JSON always holds the server's text, as `detail`.
+                let mut out = crate::term::Out::new(true, true, false, true);
+                out.request_id = Some("deploy-0001".into());
+                super::render_error(&mut out, &error);
+                let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+                assert_eq!(
+                    value,
+                    serde_json::json!({"error": {
+                        "code": "rejected", "exit": exit, "api_code": code,
+                        "message": entry.title, "cause": entry.cause, "fix": entry.agent_next(),
+                        "help": help,
+                        "detail": format!("Allowit returned HTTP {status}: the server's reason"),
+                        "request_id": "deploy-0001",
+                    }})
+                );
+            }
+            // An untyped error keeps the JSON shape without `api_code`.
             let mut out = crate::term::Out::new(true, true, false, true);
-            out.request_id = Some("deploy-0001".into());
-            super::render_error(&mut out, &error);
+            super::render_error(&mut out, &Error::uncertain("no answer"));
             let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
-            assert_eq!(
-                value,
-                serde_json::json!({"error": {
-                    "code": "rejected", "exit": exit, "api_code": code,
-                    "message": entry.title, "cause": entry.cause, "fix": entry.agent_next(),
-                    "help": help,
-                    "detail": format!("Allowit returned HTTP {status}: the server's reason"),
-                    "request_id": "deploy-0001",
-                }})
-            );
-        }
-        // An untyped error keeps the JSON shape without `api_code`.
-        let mut out = crate::term::Out::new(true, true, false, true);
-        super::render_error(&mut out, &Error::uncertain("no answer"));
-        let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
-        assert!(value["error"].get("api_code").is_none());
-        assert!(value["error"].get("help").is_none());
-        assert_eq!(value["error"]["exit"], 5);
+            assert!(value["error"].get("api_code").is_none());
+            assert!(value["error"].get("help").is_none());
+            assert_eq!(value["error"]["exit"], 5);
+        });
     }
     /// A denial names the rule that denied it, and a refusal that names a reason prints it.
     #[test]
     fn a_denial_prints_its_rule_and_a_typed_refusal_without_an_entry_keeps_its_text() {
-        use crate::error::Error;
-        let denied = Error::refused(
-            409,
-            "policy_denied",
-            "The policy denied this operation: `payment_limit` (PaymentLimitExceeded).",
-        )
-        .with_details(
-            serde_json::json!({"rule": "payment_limit", "error": "PaymentLimitExceeded"}),
-        );
-        let mut out = crate::term::Out::new(false, true, false, true);
-        super::render_error(&mut out, &denied);
-        let lines: Vec<&str> = out.stderr.lines().collect();
-        assert_eq!(
-            lines[0],
-            "error: policy_denied: The policy denied the payment"
-        );
-        assert!(lines[1].starts_with("cause: "));
-        assert_eq!(lines[2], "rule: payment_limit");
-        assert!(lines[3].starts_with("fix: Do not retry the same request."));
-        assert_eq!(lines[4], "help: https://app.allowit.ai/help/policy_denied");
-        assert!(!out.stderr.contains("PaymentLimitExceeded"));
-        // A check of this CLI before it signs has no HTTP status: its own text names the wallets
-        // at hand and stays, with the help page of its code.
-        let mut local =
-            Error::config("policy p now pays from wallet A, not from B. Nothing was signed.");
-        local.api_code = Some("wallet_differs".into());
-        let mut out = crate::term::Out::new(false, true, false, true);
-        super::render_error(&mut out, &local);
-        assert_eq!(
-            out.stderr,
-            "error: wallet_differs: policy p now pays from wallet A, not from B. Nothing was signed.\n\
+        production_server(|| {
+            use crate::error::Error;
+            let denied = Error::refused(
+                409,
+                "policy_denied",
+                "The policy denied this operation: `payment_limit` (PaymentLimitExceeded).",
+            )
+            .with_details(
+                serde_json::json!({"rule": "payment_limit", "error": "PaymentLimitExceeded"}),
+            );
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(&mut out, &denied);
+            let lines: Vec<&str> = out.stderr.lines().collect();
+            assert_eq!(
+                lines[0],
+                "error: policy_denied: The policy denied the payment"
+            );
+            assert!(lines[1].starts_with("cause: "));
+            assert_eq!(lines[2], "rule: payment_limit");
+            assert!(lines[3].starts_with("fix: Do not retry the same request."));
+            assert_eq!(lines[4], "help: https://app.allowit.ai/help/policy_denied");
+            assert!(!out.stderr.contains("PaymentLimitExceeded"));
+            // A check of this CLI before it signs has no HTTP status: its own text names the wallets
+            // at hand and stays, with the help page of its code.
+            let mut local =
+                Error::config("policy p now pays from wallet A, not from B. Nothing was signed.");
+            local.api_code = Some("wallet_differs".into());
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(&mut out, &local);
+            assert_eq!(
+                out.stderr,
+                "error: wallet_differs: policy p now pays from wallet A, not from B. Nothing was signed.\n\
              help: https://app.allowit.ai/help/wallet_differs\n"
-        );
-        // A code of a newer server has no entry: the server's text prints, with its help page.
-        let mut out = crate::term::Out::new(false, true, false, true);
-        super::render_error(
-            &mut out,
-            &Error::refused(409, "code_of_a_newer_server", "As the server said."),
-        );
-        assert_eq!(
-            out.stderr,
-            "error: code_of_a_newer_server: Allowit returned HTTP 409: As the server said.\n\
+            );
+            // A code of a newer server has no entry: the server's text prints, with its help page.
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(
+                &mut out,
+                &Error::refused(409, "code_of_a_newer_server", "As the server said."),
+            );
+            assert_eq!(
+                out.stderr,
+                "error: code_of_a_newer_server: Allowit returned HTTP 409: As the server said.\n\
              help: https://app.allowit.ai/help/code_of_a_newer_server\n"
-        );
+            );
+        });
     }
     /// A refusal for lack of credits prints the typed code, a plain cause and what the owner
     /// must do. The rail's own text for an unresolved operation is not shown.
     #[test]
     fn a_refusal_for_lack_of_credits_says_the_cause_and_what_the_owner_must_do() {
-        use crate::error::Error;
-        let refused = Error::refused(
-            402,
-            "credits_exhausted",
-            "The operation was not resolved: Allowit did not evaluate this request; retain the original request ID",
-        );
-        assert_eq!(refused.code, 4);
-        let mut out = crate::term::Out::new(false, true, false, true);
-        super::render_error(&mut out, &refused);
-        assert_eq!(
-            out.stderr,
-            "error: credits_exhausted: No credits are left\n\
+        production_server(|| {
+            use crate::error::Error;
+            let refused = Error::refused(
+                402,
+                "credits_exhausted",
+                "The operation was not resolved: Allowit did not evaluate this request; retain the original request ID",
+            );
+            assert_eq!(refused.code, 4);
+            let mut out = crate::term::Out::new(false, true, false, true);
+            super::render_error(&mut out, &refused);
+            assert_eq!(
+                out.stderr,
+                "error: credits_exhausted: No credits are left\n\
              cause: Allowit charges the policy's owner credits for each request that it evaluates, and the owner has none left. Allowit refused this request before it evaluated the policy: nothing was signed, sent or charged.\n\
              fix: Tell the owner to get credits from Allowit: the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.\n\
              help: https://app.allowit.ai/help/credits_exhausted\n\
              more: add --verbose for the server's own text\n"
-        );
-        let mut out = crate::term::Out::new(true, true, false, true);
-        out.request_id = Some("pay-0001".into());
-        super::render_error(&mut out, &refused);
-        let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
-        let error = &value["error"];
-        assert_eq!(error["api_code"], "credits_exhausted");
-        assert_eq!(
-            (error["exit"].as_i64(), error["code"].as_str()),
-            (Some(4), Some("rejected"))
-        );
-        assert!(
-            error["cause"]
-                .as_str()
-                .unwrap()
-                .contains("nothing was signed, sent or charged")
-        );
-        assert!(error["fix"].as_str().unwrap().contains("Tell the owner"));
-        assert_eq!(error["request_id"], "pay-0001");
-        assert!(!error["message"].as_str().unwrap().contains("not resolved"));
-        for code in [
-            "credits_insufficient",
-            "allowance_exhausted",
-            "evaluation_running",
-        ] {
-            let mut out = crate::term::Out::new(false, true, false, true);
-            super::render_error(&mut out, &Error::refused(409, code, "the rail's text"));
-            assert!(
-                out.stderr.starts_with(&format!("error: {code}: ")),
-                "{}",
-                out.stderr
             );
-            assert!(out.stderr.contains("\ncause: ") && out.stderr.contains("\nfix: "));
-            assert!(!out.stderr.contains("the rail's text"));
-        }
+            let mut out = crate::term::Out::new(true, true, false, true);
+            out.request_id = Some("pay-0001".into());
+            super::render_error(&mut out, &refused);
+            let value: serde_json::Value = serde_json::from_str(&out.stderr).unwrap();
+            let error = &value["error"];
+            assert_eq!(error["api_code"], "credits_exhausted");
+            assert_eq!(
+                (error["exit"].as_i64(), error["code"].as_str()),
+                (Some(4), Some("rejected"))
+            );
+            assert!(
+                error["cause"]
+                    .as_str()
+                    .unwrap()
+                    .contains("nothing was signed, sent or charged")
+            );
+            assert!(error["fix"].as_str().unwrap().contains("Tell the owner"));
+            assert_eq!(error["request_id"], "pay-0001");
+            assert!(!error["message"].as_str().unwrap().contains("not resolved"));
+            for code in [
+                "credits_insufficient",
+                "allowance_exhausted",
+                "evaluation_running",
+            ] {
+                let mut out = crate::term::Out::new(false, true, false, true);
+                super::render_error(&mut out, &Error::refused(409, code, "the rail's text"));
+                assert!(
+                    out.stderr.starts_with(&format!("error: {code}: ")),
+                    "{}",
+                    out.stderr
+                );
+                assert!(out.stderr.contains("\ncause: ") && out.stderr.contains("\nfix: "));
+                assert!(!out.stderr.contains("the rail's text"));
+            }
+        });
     }
     /// A denied request was evaluated, so its error shows what that cost the policy owner.
     #[test]
