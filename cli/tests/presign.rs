@@ -127,7 +127,7 @@ fn exec_checks_the_server_key_and_the_policy_before_the_agent_signs() {
                     200,
                     facts("active", &description.wallet, &description.server),
                 ),
-                "wallet_unreadable",
+                "wallet_unverified",
             ),
         ] {
             let server = answer(listener.try_clone().unwrap(), vec![reply]);

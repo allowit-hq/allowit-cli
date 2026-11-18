@@ -6,12 +6,14 @@
 //! operation, and the server's current answer must both be the pinned key.
 //!
 //! The wallet: the policy, as the server answers it to its agent, must be active and name the
-//! wallet of the profile, and the ledger must hold that wallet, unpaused. What the ledger must
-//! show of the agent depends on the wallet kind. A Native wallet is an account that the owner
-//! owns: the agent has a key and no account of its own, and the agent key and the server key
-//! must be signers of the wallet account. A contract wallet (Simple, Standard, Custom) is a
-//! contract: its agent has neither an account nor a signer seat, and the contract checks the
-//! agent's signature itself, so the ledger must hold the contract and nothing of the agent.
+//! wallet of the profile, and the ledger must still hold that wallet as the profile names it.
+//! The rail checks the ledger as it checks an import, by the wallet kind. A Native wallet is an
+//! account that the owner owns: the agent has a key and no account of its own, so the account
+//! must exist with the owner, the agent key and the server key as its signers at the policy's
+//! weights, and the owner's approval of the source must hold. A contract wallet (Simple,
+//! Standard, Custom) is a contract: its agent has neither an account nor a signer seat, and the
+//! contract checks the agent's signature itself, so the contract must exist, be unpaused and
+//! name this owner, agent key, server key and policy.
 use crate::{
     commands::policy_help::{self, Facts},
     ctx::Ctx,
@@ -20,7 +22,6 @@ use crate::{
 };
 use allowit_sdk::{
     config::ServerAuthority,
-    kinds::WalletKind,
     profiles::{Description, Profile},
     wallet::LocalSigner,
 };
@@ -227,43 +228,25 @@ pub(crate) fn check_before_signing(
             rail.id
         ))
     })?;
-    let document = profile.document()?;
-    let bytes =
-        serde_json::to_vec(&document).map_err(|_| Error::config("Cannot encode the profile"))?;
-    let kind = allowit_sdk::kinds::wallet_kind(rail.id, &bytes)?;
-    let ledger = read_ledger(rail, &document, d, rpc);
-    judge_ledger(rail, kind, d, ledger)
+    let authority = ServerAuthority::new(rail.id, origin, pinned)?;
+    judge_ledger(rail, d, check_ledger(rail, &authority, profile, rpc))
 }
 
-/// What the ledger shows of a wallet: whether it is paused, and the signer weight of the agent
-/// key and of the server key on the wallet account. A contract wallet has no such weights.
-struct Ledger {
-    paused: bool,
-    agent_weight: u32,
-    server_weight: u32,
-}
-
-/// The wallet of `document` as the ledger shows it through `rpc`. The error is the cause that
-/// the rail reports, such as a wallet that the ledger does not hold.
-fn read_ledger(
+/// The wallet of `profile` on the ledger through `rpc`, checked as the rail checks an import of
+/// the profile. The error is the cause that the rail reports, such as a wallet that the ledger
+/// does not hold or that names other keys.
+fn check_ledger(
     rail: &RailInfo,
-    document: &serde_json::Value,
-    d: &Description,
+    authority: &ServerAuthority,
+    profile: &Profile,
     rpc: &str,
-) -> std::result::Result<Ledger, String> {
-    let read = || -> Result<Ledger> {
-        let config = serde_json::to_vec(&document["config"])
-            .map_err(|_| Error::config("Cannot encode the wallet configuration"))?;
-        let configuration = allowit_sdk::runtime::owner::configuration(rail.id, &config)?;
-        let snapshot = allowit_sdk::runtime::Runtime::new(rail.id, rpc)?
-            .discover_snapshot(&configuration, None)?;
-        Ok(Ledger {
-            paused: snapshot.paused,
-            agent_weight: snapshot.signer_weight(&d.agent).unwrap_or(0),
-            server_weight: snapshot.signer_weight(&d.server).unwrap_or(0),
-        })
+) -> std::result::Result<(), String> {
+    let check = || -> Result<()> {
+        allowit_sdk::runtime::Runtime::new(rail.id, rpc)?
+            .import(authority, profile.descriptor.get().as_bytes())?;
+        Ok(())
     };
-    read().map_err(|error| error.message)
+    check().map_err(|error| error.message)
 }
 
 /// The policy as the server answers it to its agent, before a signature.
@@ -313,50 +296,21 @@ fn judge_policy(
     }
 }
 
-/// The wallet on the ledger, before a signature, as its kind needs it.
+/// The wallet on the ledger, before a signature.
 fn judge_ledger(
     rail: &RailInfo,
-    kind: WalletKind,
     d: &Description,
-    ledger: std::result::Result<Ledger, String>,
+    check: std::result::Result<(), String>,
 ) -> Result<()> {
-    let wallet = &d.wallet;
-    let ledger = ledger.map_err(|cause| {
+    check.map_err(|cause| {
         refused(
-            "wallet_unreadable",
+            "wallet_unverified",
             format!(
-                "wallet {wallet} of policy {} is not readable on {}: {cause}. Nothing was signed. If the endpoint answers (allowit rail show), ask the owner whether the wallet still exists.",
-                d.policy_id, rail.label
+                "wallet {} of policy {} does not hold this policy on {} now: {cause}. Nothing was signed. If the endpoint answers (allowit rail show), ask the owner whether the wallet still exists and still names your key.",
+                d.wallet, d.policy_id, rail.label
             ),
         )
-    })?;
-    if ledger.paused {
-        return Err(refused(
-            "wallet_paused",
-            format!("the owner paused wallet {wallet}. Nothing was signed. Ask the owner."),
-        ));
-    }
-    if kind == WalletKind::Native {
-        if ledger.agent_weight == 0 {
-            return Err(refused(
-                "agent_not_signer",
-                format!(
-                    "your key {} is not a signer of wallet account {wallet}. Nothing was signed. Ask the owner.",
-                    d.agent
-                ),
-            ));
-        }
-        if ledger.server_weight == 0 {
-            return Err(refused(
-                "server_not_signer",
-                format!(
-                    "the server key {} is not a signer of wallet account {wallet}, so the server cannot co-sign. Nothing was signed. Ask the owner.",
-                    d.server
-                ),
-            ));
-        }
-    }
-    Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -400,14 +354,6 @@ mod tests {
     fn rail() -> &'static RailInfo {
         routing::all().first().expect("a registered rail")
     }
-    fn ledger(paused: bool, agent: u32, server: u32) -> std::result::Result<Ledger, String> {
-        Ok(Ledger {
-            paused,
-            agent_weight: agent,
-            server_weight: server,
-        })
-    }
-
     #[test]
     fn a_server_key_other_than_the_pinned_one_is_refused_before_signing() {
         let d = description();
@@ -459,58 +405,16 @@ mod tests {
     }
 
     #[test]
-    fn the_ledger_must_hold_the_wallet_as_its_kind_needs() {
+    fn a_wallet_that_the_ledger_does_not_hold_as_the_profile_names_it_is_refused() {
         let d = description();
-        // A wallet that the ledger does not hold, or that it cannot read.
-        assert_eq!(
-            code(judge_ledger(
-                rail(),
-                WalletKind::Native,
-                &d,
-                Err("Native account not found".into())
-            ))
-            .as_deref(),
-            Some("wallet_unreadable")
-        );
-        for kind in [
-            WalletKind::Native,
-            WalletKind::Simple,
-            WalletKind::Standard,
-            WalletKind::Custom,
+        assert!(judge_ledger(rail(), &d, Ok(())).is_ok());
+        for cause in [
+            "Native account not found",
+            "Imported profile differs from current native policy or authority",
         ] {
-            assert_eq!(
-                code(judge_ledger(rail(), kind, &d, ledger(true, 1, 1))).as_deref(),
-                Some("wallet_paused"),
-                "{kind:?}"
-            );
-            assert!(judge_ledger(rail(), kind, &d, ledger(false, 1, 1)).is_ok());
-        }
-        // A Native wallet is an account of the owner: the agent key and the server key must
-        // be its signers.
-        assert_eq!(
-            code(judge_ledger(
-                rail(),
-                WalletKind::Native,
-                &d,
-                ledger(false, 0, 1)
-            ))
-            .as_deref(),
-            Some("agent_not_signer")
-        );
-        assert_eq!(
-            code(judge_ledger(
-                rail(),
-                WalletKind::Native,
-                &d,
-                ledger(false, 1, 0)
-            ))
-            .as_deref(),
-            Some("server_not_signer")
-        );
-        // A contract wallet's agent has no account and no signer seat: the contract checks
-        // its signature itself.
-        for kind in [WalletKind::Simple, WalletKind::Standard, WalletKind::Custom] {
-            assert!(judge_ledger(rail(), kind, &d, ledger(false, 0, 0)).is_ok());
+            let error = judge_ledger(rail(), &d, Err(cause.into())).unwrap_err();
+            assert!(error.message.contains(cause), "{}", error.message);
+            assert_eq!(code(Err(error)).as_deref(), Some("wallet_unverified"));
         }
     }
 }

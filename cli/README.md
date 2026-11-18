@@ -200,13 +200,13 @@ and a plain message when a check fails. Nothing is signed then.
 | The policy is active | `policy_not_active` |
 | The server names the pinned server key for the policy | `server_key_differs` |
 | The policy names the wallet of the profile | `wallet_differs` |
-| The ledger holds the wallet, through the rail's RPC endpoint | `wallet_unreadable` |
-| The wallet is not paused | `wallet_paused` |
-| Native wallet: the agent key and the server key are signers of the wallet account | `agent_not_signer`, `server_not_signer` |
+| The ledger holds the wallet as the profile names it, read through the rail's RPC endpoint as an import is checked | `wallet_unverified` |
 
-A Native wallet is an account that the owner owns; its agent has a key and no account of its own. A contract wallet
-(Simple, Standard, Custom) is a contract; its agent has no account and no signer seat, and the contract checks the
-agent's signature itself, so the ledger check reads the contract only.
+The ledger check depends on the wallet kind. A Native wallet is an account that the owner owns; its agent has a key
+and no account of its own. The account must exist with the owner, the agent key and the server key as its signers
+at the policy's weights, and the owner's approval of the source must hold. A contract wallet (Simple, Standard,
+Custom) is a contract; its agent has no account and no signer seat, and the contract checks the agent's signature
+itself. The contract must exist, be unpaused and name this owner, agent key, server key and policy.
 
 ## Generate an owner policy
 
