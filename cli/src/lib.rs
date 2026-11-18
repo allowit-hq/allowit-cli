@@ -218,6 +218,7 @@ fn finish(mut out: Out, result: error::Result<i32>) -> i32 {
 /// `credits` in JSON, one line in text.
 fn render_error(out: &mut Out, e: &Error) {
     let explained = explain::explained(e);
+    let local_fix = explain::local_fix(e);
     let help = explain::help(e);
     let reason = e
         .detail("reason")
@@ -249,6 +250,9 @@ fn render_error(out: &mut Out, e: &Error) {
             value["error"]["fix"] = explained.fix.into();
             value["error"]["detail"] = e.message.as_str().into();
         }
+        if let Some(fix) = local_fix {
+            value["error"]["fix"] = fix.into();
+        }
         if let Some(help) = &help {
             value["error"]["help"] = help.as_str().into();
         }
@@ -276,8 +280,8 @@ fn render_error(out: &mut Out, e: &Error) {
         if let Some(reason) = reason {
             out.stderr += &format!("reason: {}\n", sender_text(reason));
         }
-        if let Some(explained) = &explained {
-            out.stderr += &format!("fix: {}\n", explained.fix);
+        if let Some(fix) = explained.as_ref().map(|x| x.fix).or(local_fix) {
+            out.stderr += &format!("fix: {fix}\n");
         }
         if let Some(help) = &help {
             out.stderr += &format!("help: {help}\n");
@@ -506,10 +510,17 @@ mod display_tests {
             local.api_code = Some("wallet_differs".into());
             let mut out = crate::term::Out::new(false, true, false, true);
             super::render_error(&mut out, &local);
+            // The catalogue's step for the agent follows the own line, as after a server's refusal.
             assert_eq!(
                 out.stderr,
-                "error: wallet_differs: policy p now pays from wallet A, not from B. Nothing was signed.\n\
-             help: https://app.allowit.ai/help/wallet_differs\n"
+                format!(
+                    "error: wallet_differs: policy p now pays from wallet A, not from B. Nothing was signed.\n\
+                     fix: {}\n\
+                     help: https://app.allowit.ai/help/wallet_differs\n",
+                    allowit_sdk::errors::entry("wallet_differs")
+                        .unwrap()
+                        .agent_next()
+                )
             );
             // A code of a newer server has no entry: the server's text prints, with its help page.
             let mut out = crate::term::Out::new(false, true, false, true);

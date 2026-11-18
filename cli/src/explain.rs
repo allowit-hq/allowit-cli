@@ -27,6 +27,15 @@ pub(crate) fn explained(error: &Error) -> Option<Explained> {
     })
 }
 
+/// The catalogue's step for an agent, for a check of this CLI before it signs: its own line names
+/// the keys and wallets at hand, and the step follows it, as after a refusal of the server.
+pub(crate) fn local_fix(error: &Error) -> Option<&'static str> {
+    if error.status.is_some() {
+        return None;
+    }
+    errors::entry(error.api_code.as_deref()?).map(|entry| entry.agent_next())
+}
+
 /// The help page of a typed refusal: `<origin>/help/<code>` on the origin of `ALLOWIT_URL`, which
 /// serves the app. A code of a newer server has a page too. An invalid `ALLOWIT_URL` gives none.
 pub(crate) fn help(error: &Error) -> Option<String> {

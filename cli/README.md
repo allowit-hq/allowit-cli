@@ -429,7 +429,8 @@ more: HTTP 409; add --verbose for the server's own text
 - Only the catalogue writes `cause:` and `fix:`, and only this CLI writes `help:`. A second line of a sender's text
   starts with two spaces, and its terminal control characters print as escapes.
 - A check of this CLI before it signs, such as `wallet_differs`, prints its own line, which names the keys and
-  wallets at hand, and `help:`. So does a code of a newer server that this release does not know.
+  wallets at hand, then the catalogue's `fix:` and `help:`. A code of a newer server that this release does not know
+  prints the server's text and `help:`.
 - A server of another release than this CLI answers `server_release_differs`: install the CLI that the server
   serves with the install line of its app.
 
