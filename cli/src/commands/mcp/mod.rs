@@ -161,22 +161,21 @@ fn tools() -> Value {
     ])
 }
 
-/// A failed tool call: the CLI error with its exit code and the server's code. A refusal that
-/// names credits carries this CLI's own message with its cause and what the owner must do, as
-/// the command line prints them, and a denial that Allowit charged carries `credits`.
+/// A failed tool call: the CLI error with its exit code and the server's code. A refusal of the
+/// server whose code has an entry in the error catalogue carries the catalogue's title, cause,
+/// next step and help page, as the command line prints them, and the server's own text as
+/// `detail`. A denial that Allowit charged carries `credits`.
 fn tool_error(
     error: &Error,
     request_id: Option<&str>,
     charge: Option<crate::credits::Charge>,
 ) -> Value {
     let exit = Exit::from_code(error.code);
-    let explained = error
-        .api_code
-        .as_deref()
-        .and_then(crate::credits::explained);
+    let explained = crate::explain::explained(error);
+    let help = crate::explain::help(error);
     let message = explained
         .as_ref()
-        .map_or(error.message.as_str(), |text| text.message);
+        .map_or(error.message.as_str(), |text| text.title);
     let mut detail = json!({
         "code": exit.name(),
         "exit": error.code,
@@ -185,12 +184,19 @@ fn tool_error(
     if let Some(code) = &error.api_code {
         detail["api_code"] = code.as_str().into();
     }
+    if let Some(rule) = error.detail("rule") {
+        detail["rule"] = rule.into();
+    }
     if let Some(reason) = error.detail("reason") {
         detail["reason"] = reason.into();
     }
     if let Some(explained) = &explained {
         detail["cause"] = explained.cause.into();
         detail["fix"] = explained.fix.into();
+        detail["detail"] = error.message.as_str().into();
+    }
+    if let Some(help) = &help {
+        detail["help"] = help.as_str().into();
     }
     if let Some(charge) = &charge {
         detail[crate::credits::KEY] = charge.document();
@@ -204,6 +210,12 @@ fn tool_error(
     };
     if let Some(explained) = &explained {
         summary.push_str(&format!(". {} {}", explained.cause, explained.fix));
+        if let Some(rule) = error.detail("rule") {
+            summary.push_str(&format!(" Rule: {rule}."));
+        }
+    }
+    if let Some(help) = &help {
+        summary.push_str(&format!(" Help: {help}"));
     }
     if let Some(charge) = &charge {
         summary.push_str(&format!(". Credits: {}", charge.text()));

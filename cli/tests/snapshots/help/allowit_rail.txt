@@ -25,7 +25,8 @@ Global options:
       --json              Print JSON instead of text
   -y, --yes               Confirm destructive actions without a prompt
   -q, --quiet             Print no progress on stderr
-  -v, --verbose           Print the resolved rail, wallet and config directory on stderr
+  -v, --verbose           Print the resolved rail, wallet and config directory, and a refusal's
+                          server text, on stderr
       --no-color          Disable color (NO_COLOR also disables it)
       --config-dir <DIR>  Config directory [default: $XDG_CONFIG_HOME/allowit or ~/.config/allowit]
                           [env: ALLOWIT_CONFIG_DIR]

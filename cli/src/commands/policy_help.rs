@@ -136,7 +136,43 @@ fn unavailable(origin: &str, status: Option<u16>) -> Error {
     ));
     error.code = allowit_sdk::transport_failure::NETWORK_UNAVAILABLE;
     error.status = status;
+    error.api_code = Some(SERVICE_UNREACHABLE.into());
     error
+}
+
+/// The code of a server that did not answer.
+const SERVICE_UNREACHABLE: &str = "service_unreachable";
+/// The code of a server that is another release than this CLI: it does not know the route or
+/// the method of a policy read, or it takes the read from its own app only.
+const SERVER_RELEASE_DIFFERS: &str = "server_release_differs";
+
+/// A refusal of a policy read with no narrower cause above. A typed refusal keeps the server's
+/// code and text. A server of another release answers 403 or 405: it takes this read from its
+/// app only, or by another method.
+fn refused(origin: &str, status: u16, body: &[u8], route: &str) -> Error {
+    let reply = serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
+    let code = reply["code"]
+        .as_str()
+        .filter(|code| allowit_sdk::errors::is_code(code));
+    let other_release = matches!(code, Some("app_origin_required" | "method_not_allowed"))
+        || (code.is_none() && matches!(status, 403 | 405));
+    if other_release {
+        return Error::refused(
+            status,
+            SERVER_RELEASE_DIFFERS,
+            format!("{origin} does not serve {route} of this CLI; check ALLOWIT_URL"),
+        );
+    }
+    match code {
+        Some(code) => {
+            let text = reply["error"]
+                .as_str()
+                .filter(|text| text.len() <= 300 && !text.chars().any(char::is_control))
+                .unwrap_or("The policy request was refused");
+            Error::refused(status, code, text)
+        }
+        None => Error::api(status, "The policy request was refused"),
+    }
 }
 
 /// The refusal of a policy id that the server at `origin` does not hold. A server of an
@@ -152,8 +188,9 @@ fn unknown(origin: &str, body: &[u8], route: &str) -> Error {
             format!("{origin} has no policy with this id; copy the line from the app again"),
         )
     } else {
-        Error::api(
+        Error::refused(
             404,
+            SERVER_RELEASE_DIFFERS,
             format!("{origin} does not serve {route}; check ALLOWIT_URL"),
         )
     }
@@ -196,7 +233,7 @@ pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
         status if status >= 500 => {
             return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
         }
-        status => return Err(Error::api(status, "The policy request was refused")),
+        status => return Err(refused(&origin, status, &response.body, "policy help")),
     }
     let facts: Facts = serde_json::from_slice(&response.body).map_err(|_| invalid())?;
     if facts.policy_id.as_deref().is_some_and(|named| named != id) {
@@ -235,18 +272,13 @@ pub(crate) fn read_as_agent(origin: &str, id: &str, signer: &LocalSigner) -> Res
             ));
         }
         404 => return Err(unknown(origin, &body, "the agent's policy read")),
-        // A server of an earlier release reads the policy with GET only.
-        405 => {
-            return Err(Error::api(
-                405,
-                format!("{origin} does not serve the agent's policy read; check ALLOWIT_URL"),
-            ));
-        }
         503 => return Err(unavailable(origin, Some(503))),
         status if status >= 500 => {
             return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
         }
-        status => return Err(Error::api(status, "The policy request was refused")),
+        // A server of an earlier release reads the policy with GET only, and takes a POST from
+        // its own app only.
+        status => return Err(refused(origin, status, &body, "the agent's policy read")),
     }
     let facts: Facts = serde_json::from_slice(&body).map_err(|_| invalid())?;
     if facts.policy_id.as_deref() != Some(id)

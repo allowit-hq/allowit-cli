@@ -628,17 +628,79 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
             vec![(404, json!({"error":"Endpoint not found."}))],
         );
         assert_eq!(code(&output), Some(4), "{}", stderr(&output));
-        assert!(stderr(&output).contains("does not serve policy help"));
+        // The agent reads what happened and what to do, with the help page of the code.
+        let text = stderr(&output);
+        assert!(
+            text.contains("error: server_release_differs: The CLI and the server are different releases\ncause: "),
+            "{text}"
+        );
+        assert!(
+            text.contains("\nfix: Check ALLOWIT_URL. Then install the CLI that this server serves"),
+            "{text}"
+        );
+        assert!(text.contains("/help/server_release_differs\n"), "{text}");
+        // This CLI's own line about the route prints with --verbose.
+        assert!(!text.contains("does not serve policy help"), "{text}");
+        let (output, _) = served(
+            &mut sandbox,
+            &["--verbose", ID, "help"],
+            vec![(404, json!({"error":"Endpoint not found."}))],
+        );
+        assert!(
+            stderr(&output).contains("\nserver: ")
+                && stderr(&output).contains("does not serve policy help"),
+            "{}",
+            stderr(&output)
+        );
+        // A server that takes this read from its own app only, or by another method, is another
+        // release too: the staging smoke of 2026-11-18 printed "HTTP 403: The policy request was
+        // refused" for it.
+        for (status, body) in [
+            (
+                403,
+                json!({"error":"This request must come from the Allowit app."}),
+            ),
+            (
+                403,
+                json!({"error":"This request must come from the Allowit app.","code":"app_origin_required"}),
+            ),
+            (405, json!({"error":"Use GET for the agent policy facts."})),
+            (
+                405,
+                json!({"error":"Method not allowed.","code":"method_not_allowed"}),
+            ),
+        ] {
+            let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(status, body.clone())]);
+            let text = stderr(&output);
+            assert!(
+                text.contains("error: server_release_differs: "),
+                "{status} {body}: {text}"
+            );
+            assert!(!text.contains("The policy request was refused"), "{text}");
+        }
         let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(503, json!({}))]);
         assert_eq!(code(&output), Some(7), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("error: service_unreachable: Allowit did not answer\n"),
+            "{}",
+            stderr(&output)
+        );
         // No server at all.
         sandbox.set("ALLOWIT_URL", "http://127.0.0.1:1");
         let output = sandbox.run(&[ID, "help"]);
         assert_eq!(code(&output), Some(7), "{}", stderr(&output));
+        // The CLI's own line names the server that did not answer, with the help page.
+        assert!(
+            stderr(&output).contains("error: service_unreachable: The Allowit server at http://127.0.0.1:1 did not answer"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(stderr(&output).contains("\nhelp: http://127.0.0.1:1/help/service_unreachable\n"));
         // JSON errors keep the one-object shape.
         let output = sandbox.run(&["--json", ID, "help"]);
         let error: Value = serde_json::from_slice(&output.stderr).unwrap();
         assert_eq!(error["error"]["exit"], 7);
+        assert_eq!(error["error"]["api_code"], "service_unreachable");
         // A word that is no policy id is an unknown command, as before.
         let output = sandbox.run(&["short", "help"]);
         assert_eq!(code(&output), Some(2));
