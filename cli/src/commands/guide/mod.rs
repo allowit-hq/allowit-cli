@@ -51,6 +51,7 @@ mod tests {
             "allowit exec --op transfer",
             "allowit status ID --wait 60s",
             "allowit history",
+            "allowit price VAULT",
             "- 20: the policy denied the request",
             "pay without a request from the owner",
             "keys export",
