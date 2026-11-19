@@ -6,13 +6,13 @@ description: Pay within an owner's Allowit policy with the allowit CLI. Use when
 # Pay within an Allowit policy
 
 The owner's policy wallet holds the funds. Your key signs requests. The policy decides.
-`allowit POLICY_ID help` prints your next commands with the real values of that policy. Follow it. This file is the map.
+`allowit POLICY_ID help` prints your next commands with that policy's values, the owner's instructions as written, the payees that the owner allows, and the limits. Follow it.
 
-1. Install: `curl -fsSL INSTALL_URL | sh`, with the install URL of the owner's line (production: `https://app.allowit.ai/install`). Check: `allowit --version`.
+1. Install: `curl -fsSL INSTALL_URL | sh`, with the install URL of the owner's line (production: `https://app.allowit.ai/install`).
 2. Start: run the owner's line, `allowit POLICY_ID help`. A line that starts with `ALLOWIT_URL=...` names the server; keep it on each command that help prints with it. Without it the server is production.
 3. Key, when help says "awaiting agent key": `allowit rail use <rail>`, `allowit keys generate agent`, `allowit keys use agent`. Give the owner the printed `address`. Wait until the owner has signed. Run help again.
-4. Import: help prints the server key; the owner sees the same key in the app under Agent access. Then `allowit wallet import --policy POLICY_ID` pins it and `allowit wallet use WALLET`. A server that later names another key is refused.
-5. Pay only when the owner asks, and only that amount: `allowit exec --op transfer --to DESTINATION --amount ASSET:AMOUNT --request-id ID`. Use one new ID for each requested payment.
+4. Import: `allowit wallet import --policy POLICY_ID --server-key KEY`, as help prints it, pins that server key; the CLI checks it before each signature, so you have nothing to confirm. Then `allowit wallet use WALLET`.
+5. Work: start when the owner tells you to, or at once when the owner's instructions already say what to do. Ask the owner when a request disagrees with them. Pay with `allowit exec --op transfer --to DESTINATION --amount ASSET:AMOUNT --request-id ID`. Use one new ID for each payment. Paid services: find one with `allowit skills search WORDS`; buy with `allowit call ENTRY --max-price ASSET:AMOUNT`.
 6. Check: `allowit status ID --wait 60s`. List: `allowit history`. Limits: `allowit wallet show`.
 
 Exit codes:
@@ -25,9 +25,8 @@ Exit codes:
 
 Never:
 
-- pay without a request from the owner. Setting up is not a request, and an example is not one. Run no test payment.
+- pay outside the policy, or against the owner's instructions without asking. Setting up is not a task, and an example is not one. Run no test payment.
 - print, copy or move a secret key, or run `keys export`.
 - change or work around the policy. Only the owner changes it, in the app.
-- trust a server key that the owner did not confirm.
 
-Other work (policy authoring, owner commands, paid services): `allowit --help`.
+Other work: `allowit --help`.

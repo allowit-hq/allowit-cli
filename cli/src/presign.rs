@@ -70,9 +70,15 @@ pub(crate) struct PolicyProfile {
 }
 
 /// The public profile of policy `id` from the `ALLOWIT_URL` server, read as its agent with the
-/// selected agent key of `rail`. The server key comes from the public answer: it must be the
-/// key that this device pinned for that server, if it pinned one.
-pub(crate) fn policy_profile(cx: &mut Ctx, rail: &RailInfo, id: &str) -> Result<PolicyProfile> {
+/// selected agent key of `rail`. The server key comes from the public answer: it must be
+/// `expected`, the key that the agent's help printed, when the import names one, and the key
+/// that this device pinned for that server, if it pinned one.
+pub(crate) fn policy_profile(
+    cx: &mut Ctx,
+    rail: &RailInfo,
+    id: &str,
+    expected: Option<&str>,
+) -> Result<PolicyProfile> {
     let (origin, facts) = policy_help::fetch(cx, id)?;
     let network = routing::info(&facts.network)
         .map_err(|_| Error::uncertain("The server returned invalid policy facts"))?;
@@ -91,6 +97,18 @@ pub(crate) fn policy_profile(cx: &mut Ctx, rail: &RailInfo, id: &str) -> Result<
         .server_public_key
         .clone()
         .ok_or_else(|| Error::uncertain("The server returned invalid policy facts"))?;
+    // The key that the agent's help printed, when the import names it: the server answers
+    // the same key now, or nothing is imported.
+    if let Some(expected) = expected
+        && expected != key
+    {
+        return Err(refused(
+            SERVER_KEY_DIFFERS,
+            format!(
+                "{origin} names server key {key} for this policy now, and the help printed {expected}. Nothing was imported. Ask the owner which server key the app shows under Agent access."
+            ),
+        ));
+    }
     let authority = ServerAuthority::new(rail.id, &origin, &key)
         .map_err(|_| Error::uncertain("The server returned invalid policy facts"))?;
     let pinned = cx

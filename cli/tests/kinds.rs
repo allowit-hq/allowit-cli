@@ -436,3 +436,64 @@ fn wallet_show_prints_each_param_in_human_units_with_the_asset_unit() {
         }
     });
 }
+
+/// `policy deploy` reads the bound kind of the draft. A Native draft deploys the agent's own
+/// account and takes no executable; a contract wallet draft without its reviewed code is refused
+/// before any key or network access.
+#[test]
+fn a_native_draft_deploys_without_an_executable_and_a_contract_draft_needs_one() {
+    every_rail(|rail| {
+        let net = rail.network;
+        let mut sandbox = Sandbox::new("deploy-kinds");
+        // A server that nothing answers: each refusal comes before any request.
+        sandbox.set("ALLOWIT_URL", "http://127.0.0.1:9");
+        let server = rail.account(13).0;
+        sandbox.ok(&["rail", "use", net]);
+        sandbox.ok(&["rail", "trust", "http://127.0.0.1:9", &server]);
+        sandbox.ok(&["keys", "generate", "owner"]);
+        sandbox.ok(&["keys", "generate", "agent"]);
+        let deploy = |kind: &str| {
+            let draft = sandbox.private_file(
+                &format!("{kind}-draft.json"),
+                &json!({"id": "policy-0001", "walletKind": kind}).to_string(),
+            );
+            sandbox.run(&[
+                "--rpc-url",
+                "http://127.0.0.1:9",
+                "policy",
+                "deploy",
+                draft.to_str().unwrap(),
+                "--owner-key",
+                "owner",
+                "--origin",
+                "http://localhost:5173",
+                "--agent-key",
+                "agent",
+                "--server",
+                &server,
+                "--request-id",
+                "deploy-0001",
+                "--fee-limit",
+                "2000000000",
+            ])
+        };
+        let contract = deploy("standard");
+        assert_eq!(code(&contract), Some(2), "{}", stderr(&contract));
+        assert!(
+            stderr(&contract)
+                .contains("A contract wallet deploys reviewed code: name it with --executable"),
+            "{}",
+            stderr(&contract)
+        );
+        // A Native draft reaches the owner's confirmation, which names the account it creates.
+        let native = deploy("native");
+        assert_eq!(code(&native), Some(2), "{}", stderr(&native));
+        assert!(
+            stderr(&native).contains(
+                "Create and fund the agent's wallet account from the owner account, and bind this exact policy to it: pass --yes to confirm"
+            ),
+            "{}",
+            stderr(&native)
+        );
+    });
+}
