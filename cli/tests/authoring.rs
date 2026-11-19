@@ -95,7 +95,8 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     ] {
         let checked = sandbox.json(args);
         assert_eq!(checked["profile"], "server", "{args:?}");
-        assert_eq!(checked["placement"], "server", "{args:?}");
+        // Only Core's derivation for a Custom wallet states a placement.
+        assert!(checked["placement"].is_null(), "{args:?}");
         assert_eq!(checked["serverFunctions"], called, "{args:?}");
         assert_eq!(checked["prefix"], serde_json::json!(["payment_limit"]));
         assert_eq!(checked["sourceHash"], allowit_sdk::digest(asks.as_bytes()));
@@ -195,7 +196,9 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     ] {
         let checked = sandbox.json(args);
         assert_eq!(checked["profile"], "portable", "{args:?}");
-        assert_eq!(checked["placement"], "server", "{args:?}");
+        // The canonical rules that a Simple or Standard wallet runs on chain are those that its
+        // installation binds: the check states no placement for them.
+        assert!(checked["placement"].is_null(), "{args:?}");
         assert_eq!(checked["serverFunctions"], called, "{args:?}");
     }
     let native = sandbox.json(&["policy", "check", "states.rs", "--kind", "native"]);
@@ -209,10 +212,8 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
 
     // Owner text without a server function: only a keypair wallet's policy.
     let checked = sandbox.json(&["policy", "check", "reads.rs"]);
-    assert_eq!(
-        (&checked["profile"], &checked["placement"]),
-        (&serde_json::json!("server"), &serde_json::json!("server"))
-    );
+    assert_eq!(checked["profile"], "server");
+    assert!(checked["placement"].is_null());
     assert_eq!(checked["serverFunctions"], serde_json::json!([]));
     for kind in ["simple", "standard"] {
         refused(
@@ -247,17 +248,10 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     std::fs::write(sandbox.work().join("custom.rs"), &custom).unwrap();
     let native = sandbox.json(&["policy", "check", "custom.rs", "--kind", "native"]);
     assert_eq!(
-        (
-            &native["profile"],
-            &native["placement"],
-            &native["canonicalOnly"]
-        ),
-        (
-            &serde_json::json!("server"),
-            &serde_json::json!("server"),
-            &serde_json::json!(false)
-        )
+        (&native["profile"], &native["canonicalOnly"]),
+        (&serde_json::json!("server"), &serde_json::json!(false))
     );
+    assert!(native["placement"].is_null());
     assert_eq!(native["serverFunctions"], serde_json::json!([]));
     for kind in ["simple", "standard"] {
         refused(
@@ -271,7 +265,11 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     // Source for a contract: the portable profile, as before.
     let portable = sandbox.json(&["policy", "check", "policy.rs"]);
     assert_eq!(portable["profile"], "portable");
-    assert_eq!(portable["placement"], "contract");
+    assert!(portable["placement"].is_null());
+    for kind in ["simple", "standard"] {
+        let checked = sandbox.json(&["policy", "check", "policy.rs", "--kind", kind]);
+        assert!(checked["placement"].is_null(), "{kind}");
+    }
     assert_eq!(portable["serverFunctions"], serde_json::json!([]));
     // A Custom wallet's source without a server function is its own on-chain part: the
     // contract runs all of it.
@@ -327,6 +325,15 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     ] {
         assert!(stderr(&output).contains(word), "{}", stderr(&output));
     }
+    // `--onchain` keeps the warnings on stderr; stdout carries only the part.
+    let output = sandbox.run(&["policy", "check", "branched.rs", "--onchain"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("destinations runs only on the server"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("runs only on the server"));
     let only = states.replace(
         "    allowit::payment_limit(ctx, &ctx.params[allowit::PAYMENT_LIMIT])?;\n",
         "",
@@ -398,6 +405,21 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
             &["stores no policy state", "Choose the Custom wallet"],
         );
     }
+    // The refusal does not depend on `--kind`: a policy that reads owner text and writes state
+    // is a keypair wallet's policy without a kind, and that wallet keeps no state.
+    let reads_and_writes = reads.replace(
+        "    match note.as_str() {",
+        "    allowit::set_state(ctx, \"last\", ctx.request.amount)?;\n    match note.as_str() {",
+    );
+    assert_ne!(reads_and_writes, reads);
+    std::fs::write(sandbox.work().join("reads-writes.rs"), &reads_and_writes).unwrap();
+    for args in [
+        &["policy", "check", "reads-writes.rs"][..],
+        &["policy", "check", "reads-writes.rs", "--kind", "native"],
+    ] {
+        refused(args, &["The native wallet stores no policy state"]);
+    }
+    sandbox.json(&["policy", "check", "reads-writes.rs", "--kind", "custom"]);
     // A source with no server function that keeps state is its own on-chain part.
     let plain_write = include_str!("../templates/policy/src/policy.rs").replace(
         "    Ok(())\n}",
@@ -420,6 +442,18 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         serde_json::json!([{"key": "last", "keeper": "chain", "daily": false}])
     );
     assert_eq!(checked["placement"], "contract");
+    // A source that is its own on-chain part, keeps state and checks nothing gets the warning
+    // that the server gives for it.
+    let only_write = "use allowit::prelude::*;\npub fn execute(ctx: &AllowitContext) -> allowit::Result {\n    allowit::set_state(ctx, \"last\", ctx.request.amount)?;\n    Ok(())\n}\n";
+    std::fs::write(sandbox.work().join("only-write.rs"), only_write).unwrap();
+    let output = sandbox.run(&["policy", "check", "only-write.rs", "--kind", "custom"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output)
+            .contains("No canonical rule, assertion or `return Err(...)` of this policy stays"),
+        "{}",
+        stderr(&output)
+    );
     // The contract must know each key before it runs.
     let dynamic = plain_write.replace(
         "allowit::set_state(ctx, \"last\", ctx.request.amount)?;",

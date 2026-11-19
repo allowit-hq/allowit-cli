@@ -23,7 +23,9 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n
 /// each check that only the server enforces, the figures that the wallet keeps and each state
 /// key with its keeper: the wallet contract keeps a key when a step that uses it stays and no
 /// step that writes it leaves, and the server keeps every other key. --onchain prints the
-/// on-chain part itself.
+/// on-chain part itself. A policy that writes state is refused for every other kind, also when
+/// the kind is resolved without --kind. Only a Custom wallet's result states its placement: the
+/// on-chain part that its contract runs and the part that the server evaluates.
 ///
 /// A decision question that the source states as a literal and that asks an amount, an address,
 /// a price or a date gets a warning: a rule checks such a detail exactly.
@@ -89,7 +91,9 @@ pub(crate) fn onchain_view(part: &allowit_sdk::authoring::Derived) -> serde_json
 /// stays (Core's `kept` names only those checks), and about each rule that runs only on the server
 /// because of where it stands in `source`.
 pub(crate) fn warn(cx: &mut Ctx, part: &allowit_sdk::authoring::Derived, source: &str) {
-    if part.source != source && part.kept.is_empty() {
+    // The server states the same warning for a part that differs from the source or keeps
+    // state.
+    if part.kept.is_empty() && (part.source != source || !part.state.is_empty()) {
         cx.out.warning("No canonical rule, assertion or `return Err(...)` of this policy stays in its on-chain part: the server enforces them before it co-signs, and the wallet contract runs the on-chain part, the two signatures and its own effect checks.");
     }
     for check in part.server_only.iter().filter(|check| check.movable()) {
@@ -111,6 +115,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let server = allowit_sdk::authoring::check_server(&source)?;
     let portable = allowit_sdk::authoring::check(&source);
     let functions = server.functions;
+    // The kind that holds the policy, resolved once: every check below reads this kind, so a
+    // result never depends on whether `--kind` was given.
     let kind = match (args.kind, args.onchain) {
         (None, true) => Some(WalletKind::Custom),
         (Some(kind), true) if kind != WalletKind::Custom => {
@@ -118,22 +124,19 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 "--onchain prints what the contract of a Custom wallet compiles; use it with --kind custom",
             ));
         }
-        (kind, _) => kind,
+        (Some(kind), _) => Some(kind),
+        // No kind: a policy that only the server profile admits is a keypair wallet's policy.
+        (None, false) if portable.is_err() => Some(WalletKind::Native),
+        (None, false) => None,
     };
     // The contract of a Custom wallet compiles the on-chain part of its one source. Core
     // derives it; a source whose part cannot be derived reaches no Custom wallet.
     let onchain = (kind == Some(WalletKind::Custom))
         .then(|| allowit_sdk::authoring::onchain_part(&source))
         .transpose()?;
-    let server_profile = match kind {
-        // The server evaluates the whole policy of a keypair wallet and of a Custom wallet.
-        Some(WalletKind::Native | WalletKind::Custom) => true,
-        // A Simple or Standard wallet holds its source: its rail also checks it with the
-        // portable profile.
-        Some(_) => false,
-        // No kind: a policy that the portable profile refuses is a keypair wallet's policy.
-        None => portable.is_err(),
-    };
+    // The server evaluates the whole policy of a keypair wallet and of a Custom wallet. A Simple
+    // or Standard wallet holds its source: its rail also checks it with the portable profile.
+    let server_profile = matches!(kind, Some(WalletKind::Native | WalletKind::Custom));
     let shape = if server_profile {
         server.shape
     } else {
@@ -149,7 +152,7 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     // server evaluates all of it. A Simple or Standard wallet takes the canonical rules, or a
     // policy that calls a server function, which the server evaluates before it co-signs:
     // other custom code needs a contract that runs it, the Custom wallet.
-    if let Some(kind @ (WalletKind::Simple | WalletKind::Standard)) = args.kind
+    if let Some(kind @ (WalletKind::Simple | WalletKind::Standard)) = kind
         && functions.is_empty()
         && !shape.canonical_only
     {
@@ -159,8 +162,9 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         )));
     }
     // Only a Custom wallet keeps a policy's own state: its contract stores the keys of the
-    // on-chain part, and the server keeps the keys of the part that only it runs.
-    if let Some(kind @ (WalletKind::Native | WalletKind::Simple | WalletKind::Standard)) = args.kind
+    // on-chain part, and the server keeps the keys of the part that only it runs. Core's gate
+    // finds the state writes.
+    if let Some(kind @ (WalletKind::Native | WalletKind::Simple | WalletKind::Standard)) = kind
         && shape.writes_state
     {
         return Err(Error::usage(format!(
@@ -180,24 +184,28 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             allowit_sdk::authoring::compile(&part.source, &tools)?;
         }
     }
+    // The warnings go to stderr, also when stdout carries the on-chain part.
+    if let Some(part) = &onchain {
+        warn(cx, part, &source);
+    }
     if args.onchain {
         let part = onchain.expect("the Custom kind derives the on-chain part");
         // With `--json` the part is the `source` field of one JSON object.
         cx.out.source(&part.source);
         return Ok(0);
     }
-    // The server evaluates a policy that the contract of its wallet does not run in full.
-    let served = server_profile && kind != Some(WalletKind::Custom) || !functions.is_empty();
-    let split = onchain.as_ref().is_some_and(|part| part.source != source);
-    let placement = match (kind, served || split) {
-        (Some(WalletKind::Custom), true) => "contract and server",
-        (_, true) => "server",
-        (_, false) => "contract",
-    };
+    // Where the policy is enforced, only where Core's derivation states it: the contract of a
+    // Custom wallet runs the on-chain part, and the server evaluates the part that left. The
+    // canonical rules that a Simple or Standard wallet runs on chain are those that its
+    // installation binds, which this check does not read: it states no placement for them.
+    let placement = onchain.as_ref().map(|part| {
+        if part.source == source {
+            "contract"
+        } else {
+            "contract and server"
+        }
+    });
     let view = onchain.as_ref().map(onchain_view);
-    if let Some(part) = &onchain {
-        warn(cx, part, &source);
-    }
     // A question that asks a detail that a rule checks exactly leaves the result unchanged.
     for warning in super::details::warnings(&source) {
         cx.out.warning(warning);
