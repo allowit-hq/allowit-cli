@@ -45,12 +45,9 @@ pub(crate) fn help(error: &Error) -> Option<String> {
         .filter(|code| errors::is_code(code))?;
     let origin =
         crate::config::parse_origin(crate::config::env_value("ALLOWIT_URL").trim()).ok()?;
-    // A URL parser drops a tab or a line break inside the authority; the link prints as it is,
-    // so such an origin gives no link.
-    if !origin.bytes().all(|b| b.is_ascii_graphic()) {
-        return None;
-    }
-    Some(errors::help_url(&origin, code))
+    // Core gives no address for an origin that a URL parser reads otherwise than it is written,
+    // such as one with a tab or a line break in its authority: the link prints as it is.
+    errors::help_url(&origin, code)
 }
 
 #[cfg(test)]
@@ -101,13 +98,10 @@ mod tests {
         // The agent never needs credits of its own, and a request that was not evaluated keeps
         // its request ID.
         let exhausted = explained(&Error::refused(402, "credits_exhausted", "x")).unwrap();
-        assert!(exhausted.fix.contains("You need no credits of your own"));
+        assert!(exhausted.fix.contains("The agent needs no credits of its own"));
         assert!(exhausted.fix.contains("same request ID"));
-        assert!(
-            exhausted
-                .cause
-                .contains("nothing was signed, sent or charged")
-        );
+        // The catalogue states no outcome of the request, which only its sender knows.
+        assert!(!exhausted.cause.to_ascii_lowercase().contains("nothing was"));
         let running = explained(&Error::refused(409, "evaluation_running", "x")).unwrap();
         assert!(running.fix.contains("allowit status"));
         let unavailable = explained(&Error::refused(503, "credits_unavailable", "x")).unwrap();

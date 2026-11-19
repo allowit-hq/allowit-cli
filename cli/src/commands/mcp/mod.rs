@@ -903,7 +903,8 @@ mod tests {
         let result = tool_error(&allowance, Some("paid-0002"), None);
         let detail = &result["structuredContent"]["error"];
         assert_eq!(detail["api_code"], "allowance_exhausted");
-        assert!(detail["fix"].as_str().unwrap().contains("new request ID"));
+        // The step of its retry kind: the request was not evaluated and goes again unchanged.
+        assert!(detail["fix"].as_str().unwrap().contains("same request ID"));
         assert!(
             !detail["message"]
                 .as_str()

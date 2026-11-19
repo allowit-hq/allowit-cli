@@ -500,7 +500,7 @@ mod display_tests {
             );
             assert!(lines[1].starts_with("cause: "));
             assert_eq!(lines[2], "rule: payment_limit");
-            assert!(lines[3].starts_with("fix: Do not retry the same request."));
+            assert!(lines[3].starts_with("fix: Read the limits with allowit POLICY help."));
             assert_eq!(lines[4], "help: https://app.allowit.ai/help/policy_denied");
             assert!(!out.stderr.contains("PaymentLimitExceeded"));
             // A check of this CLI before it signs has no HTTP status: its own text names the wallets
@@ -561,7 +561,8 @@ mod display_tests {
                     entry.agent_next()
                 )
             );
-            assert!(entry.cause.contains("nothing was signed, sent or charged"));
+            // The step of its retry kind: the same request goes again once the owner has credits.
+            assert!(entry.agent_next().contains("same request ID"));
             let mut out = crate::term::Out::new(true, true, false, true);
             out.request_id = Some("pay-0001".into());
             super::render_error(&mut out, &refused);
@@ -572,12 +573,8 @@ mod display_tests {
                 (error["exit"].as_i64(), error["code"].as_str()),
                 (Some(4), Some("rejected"))
             );
-            assert!(
-                error["cause"]
-                    .as_str()
-                    .unwrap()
-                    .contains("nothing was signed, sent or charged")
-            );
+            // The catalogue states no outcome of the request; its cause says why it stopped.
+            assert_eq!(error["cause"], entry.cause.as_str());
             assert!(error["fix"].as_str().unwrap().contains("Tell the owner"));
             assert_eq!(error["request_id"], "pay-0001");
             assert!(!error["message"].as_str().unwrap().contains("not resolved"));
