@@ -1,9 +1,12 @@
-//! Concrete rail examples use the effective local selection, then build order.
+//! Help examples name the effective local selection, else the placeholder `RAIL`. No example
+//! takes a rail by build order: every rail is chosen by its id.
 use super::Global;
 use crate::{routing, settings::Settings};
 use clap::{CommandFactory, FromArgMatches};
 
 const RAIL_MARKER: &str = "__ALLOWIT_EXAMPLE_RAIL__";
+/// The rail of an example when none is selected: the value name of `allowit rail use`.
+const RAIL_PLACEHOLDER: &str = "RAIL";
 
 /// Read only the ordinary global options, allowing incomplete help commands.
 /// A boolean help flag prevents this preliminary parser from exiting early.
@@ -45,31 +48,8 @@ fn selected(global: &Global) -> Option<&'static str> {
         .map(|rail| rail.id)
 }
 
-fn bind(text: &str, rail: Option<&str>) -> String {
-    text.split("\n\n")
-        .filter_map(|block| {
-            let lines: Vec<_> = block
-                .lines()
-                .filter_map(|line| match rail {
-                    Some(rail) => Some(line.replace(RAIL_MARKER, rail)),
-                    None if line.contains(RAIL_MARKER) => None,
-                    None => Some(line.to_owned()),
-                })
-                .collect();
-            let value = lines.join("\n");
-            (value != "Examples:").then_some(value)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
 pub(super) fn render(text: &str, global: &Global) -> String {
-    let rail = selected(global).or_else(|| routing::all().first().map(|rail| rail.id));
-    let mut rendered = bind(text, rail);
-    if text.ends_with('\n') && !rendered.ends_with('\n') {
-        rendered.push('\n');
-    }
-    rendered
+    text.replace(RAIL_MARKER, selected(global).unwrap_or(RAIL_PLACEHOLDER))
 }
 
 pub(super) fn help(text: String, argv: &[String]) -> String {
@@ -82,30 +62,28 @@ pub(super) fn help(text: String, argv: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn examples_follow_the_actual_compiled_inventory_and_selection() {
+    fn examples_name_the_selected_rail_or_a_placeholder() {
         let global = super::Global {
             config_dir: Some(crate::settings::temp_dir("examples-inventory")),
             ..Default::default()
         };
-        let text = "Usage: allowit rail use <RAIL>\n\nExamples:\n  allowit rail use __ALLOWIT_EXAMPLE_RAIL__\n\nOptions:\n  --help";
+        let text = "Usage: allowit rail use <RAIL>\n\nExamples:\n  allowit rail use __ALLOWIT_EXAMPLE_RAIL__\n\nOptions:\n  --help\n";
+        // Without a selection no registered rail stands in, whatever the build order.
         let rendered = super::render(text, &global);
-        match crate::routing::all().first() {
-            Some(first) => {
-                assert!(rendered.contains(&format!("allowit rail use {}", first.id)));
-                let selected = crate::routing::all().last().unwrap();
-                let global = super::Global {
-                    rail: Some(selected.id.into()),
-                    ..global
-                };
-                assert!(
-                    super::render(text, &global)
-                        .contains(&format!("allowit rail use {}", selected.id))
-                );
-            }
-            None => {
-                assert!(!rendered.contains("Examples:"));
-                assert!(!rendered.contains("__ALLOWIT_EXAMPLE_RAIL__"));
-            }
+        assert!(
+            rendered.contains("\n  allowit rail use RAIL\n"),
+            "{rendered}"
+        );
+        assert!(rendered.ends_with('\n'));
+        for rail in crate::routing::all() {
+            assert!(!rendered.contains(rail.id), "{rendered}");
+            let global = super::Global {
+                rail: Some(rail.id.into()),
+                ..global.clone()
+            };
+            assert!(
+                super::render(text, &global).contains(&format!("allowit rail use {}\n", rail.id))
+            );
         }
     }
 }
