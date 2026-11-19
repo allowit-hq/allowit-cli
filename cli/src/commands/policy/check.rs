@@ -18,11 +18,12 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n
 /// A Custom wallet (--kind custom) takes one source too, checked with the server profile. The
 /// server evaluates all of it before it co-signs. The wallet contract compiles the on-chain
 /// part of the source: the steps that the chain can check by itself. The steps that depend on
-/// a server function, or on policy state that the server keeps, leave, and the server's
-/// signature enforces them. The result states the on-chain part, each check that only the
-/// server enforces, the figures that the wallet keeps and each state key with its keeper: the
-/// wallet contract keeps a key whose writes all stay, and the server keeps a key whose write
-/// depends on a server function. --onchain prints the on-chain part itself.
+/// a server function, read owner text with `as_str()`, or use policy state that the server
+/// keeps, leave, and the server's signature enforces them. The result states the on-chain part,
+/// each check that only the server enforces, the figures that the wallet keeps and each state
+/// key with its keeper: the wallet contract keeps a key when a step that uses it stays and no
+/// step that writes it leaves, and the server keeps every other key. --onchain prints the
+/// on-chain part itself.
 ///
 /// A decision question that the source states as a literal and that asks an amount, an address,
 /// a price or a date gets a warning: a rule checks such a detail exactly.
@@ -47,8 +48,10 @@ fn cause(code: &str) -> &'static str {
     match code {
         "server_call" => "it calls a server function",
         "server_value" => "it reads a value from a server function",
-        "server_branch" => "it is in a branch that depends on a server function",
-        "after_server_exit" => "it comes after an early approval that depends on a server function",
+        "server_branch" => "it is in a branch whose condition only the server can evaluate",
+        "after_server_exit" => {
+            "it comes after an early exit that only the server can evaluate, which can skip it"
+        }
         "stored_state" => "it uses policy state that the server keeps",
         _ => "it is in a statement that cannot be split",
     }
@@ -82,11 +85,12 @@ pub(crate) fn onchain_view(part: &allowit_sdk::authoring::Derived) -> serde_json
     })
 }
 
-/// Warn the owner about an on-chain part that checks nothing, and about each rule that runs
-/// only on the server because of where it stands in `source`.
+/// Warn the owner about an on-chain part in which no canonical rule, assertion or `return Err(...)`
+/// stays (Core's `kept` names only those checks), and about each rule that runs only on the server
+/// because of where it stands in `source`.
 pub(crate) fn warn(cx: &mut Ctx, part: &allowit_sdk::authoring::Derived, source: &str) {
     if part.source != source && part.kept.is_empty() {
-        cx.out.warning("The on-chain part of this policy checks nothing: the wallet contract enforces the two signatures and its own effect checks, and the server enforces the policy.");
+        cx.out.warning("No canonical rule, assertion or `return Err(...)` of this policy stays in its on-chain part: the server enforces them before it co-signs, and the wallet contract runs the on-chain part, the two signatures and its own effect checks.");
     }
     for check in part.server_only.iter().filter(|check| check.movable()) {
         cx.out.warning(format!(

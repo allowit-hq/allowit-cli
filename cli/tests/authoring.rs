@@ -290,9 +290,10 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         include_str!("../templates/policy/src/policy.rs")
     );
 
-    // A rule in a branch that depends on a server function runs only on the server: the
+    // A rule in a branch whose condition only the server can evaluate runs only on the server: the
     // result names it, and a warning tells the owner to move it. A policy whose on-chain
-    // part checks nothing is admitted, and a warning says so.
+    // part keeps no canonical rule, assertion or `return Err(...)` is admitted, and a warning
+    // says so.
     let branched = states.replace(
         "    })?;\n    Ok(())",
         "    })?;\n    if ctx.request.amount > 5 {\n        allowit::destinations(ctx, &ctx.params[allowit::DESTINATIONS])?;\n    }\n    Ok(())",
@@ -321,6 +322,7 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     for word in [
         "Line 12",
         "destinations runs only on the server",
+        "a branch whose condition only the server can evaluate",
         "Move it out",
     ] {
         assert!(stderr(&output).contains(word), "{}", stderr(&output));
@@ -333,7 +335,8 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     let output = sandbox.run(&["--json", "policy", "check", "only.rs", "--kind", "custom"]);
     assert_eq!(code(&output), Some(0), "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("checks nothing"),
+        stderr(&output)
+            .contains("No canonical rule, assertion or `return Err(...)` of this policy stays"),
         "{}",
         stderr(&output)
     );
