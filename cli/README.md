@@ -398,7 +398,7 @@ The owner of a policy pays for compute, whatever the outcome. Each request that 
 - `allowit POLICY_ID help` prints what one request costs the owner, and says when the owner has no credits left.
 - The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each item and the price list version. A call that is priced by its tokens shows what it used (`decision api 0.24 used`), a fee shows its cost and, for a network fee, the amount and rate (`network fee 0.156156 (0.0011154 <asset> at USD 0.14)`), and `inference` is the whole credits that the request paid for them. A fee that is known only after the payment, such as a settlement's network fee, is a later charge of the same request; `allowit status` shows it. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `POST /api/agent/charge` of the policy's server, signed with the agent key; a server that does not answer leaves the receipt without the row.
 - A request that Allowit refused after it evaluated it prints the same `credits:` line on stderr, and `error.credits` in JSON: a policy denial (exit 20), a denial of a decision question, a request that waits for its owner, or a failed step. The owner paid for it. A denied request ID keeps its decision: use a new request ID to ask again.
-- A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON.
+- A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON ([Errors](#errors)).
 
 | Code | Exit | Meaning | What to do |
 | --- | --- | --- | --- |
@@ -407,6 +407,34 @@ The owner of a policy pays for compute, whatever the outcome. Each request that 
 | `allowance_exhausted` | 4 | The analysis allowance of the policy is used up for today. The request is denied. | Tell the owner to raise the allowance in the app, or wait until 00:00 UTC. Then send a new request ID. |
 | `evaluation_running` | 4 | The server is evaluating the same request ID now. | Run `allowit status ID --wait 60s`. |
 | `credits_unavailable` | 4 | The server's credit ledger did not answer, so the server released no decision. | Run the same command again with the same request ID. |
+
+### Errors
+
+A refusal of the server carries a typed code. For a code with an entry in the error catalogue of Allowit core, the
+command prints the catalogue's text, the same that the app shows:
+
+```text
+error: policy_denied: The policy denied the payment
+cause: The request breaks a rule of the policy, such as an amount limit, a recipient list or a time limit. The details name the rule. Nothing was paid.
+rule: payment_limit
+fix: Do not retry the same request. Read the limits with allowit POLICY_ID help. Tell the owner which rule denied it.
+help: https://app.allowit.ai/help/policy_denied
+more: HTTP 409; add --verbose for the server's own text
+```
+
+- `help:` is the page of the code on the `ALLOWIT_URL` origin. It shows the fix as numbered steps with pictures.
+- `rule:` and `reason:` are the rule that denied a request and the reason of a refusal, from its details.
+- `--verbose` prints the server's own text as `server:`. With `--json` the error always holds it: `error.message` is
+  the title, and `error.cause`, `error.fix`, `error.help` and `error.detail` (the server's text) follow.
+- Only the catalogue writes `cause:` and `fix:`, and only this CLI writes `help:`. A second line of a sender's text
+  starts with two spaces, and its terminal control characters print as escapes.
+- A check of this CLI before it signs, such as `wallet_differs`, prints its own line, which names the keys and
+  wallets at hand, then the catalogue's `fix:` and `help:`. A code of a newer server that this release does not know
+  prints the server's text and `help:`.
+- A server of another release than this CLI answers `server_release_differs`: install the CLI that the server
+  serves with the install line of its app.
+
+`cli/tests/error_catalogue.rs` fails for a typed code that this CLI names without a catalogue entry.
 
 ### Exit codes
 

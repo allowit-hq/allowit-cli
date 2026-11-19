@@ -20,8 +20,10 @@ pub(crate) const KEY: &str = "credits";
 pub(crate) const EXHAUSTED: &str = "credits_exhausted";
 /// The evaluation stopped before a metered call that the owner's credits do
 /// not cover. The request is denied.
+#[cfg(test)]
 pub(crate) const INSUFFICIENT: &str = "credits_insufficient";
 /// The policy's analysis allowance does not cover a metered call today.
+#[cfg(test)]
 pub(crate) const ALLOWANCE: &str = "allowance_exhausted";
 /// The server is evaluating the same request now.
 pub(crate) const RUNNING: &str = "evaluation_running";
@@ -262,45 +264,6 @@ impl Lookup {
     }
 }
 
-/// What a refusal that names credits means: the cause, and what to do.
-pub(crate) struct Explained {
-    pub message: &'static str,
-    pub cause: &'static str,
-    pub fix: &'static str,
-}
-
-/// The explanation of the server code `code`, when it names credits.
-pub(crate) fn explained(code: &str) -> Option<Explained> {
-    Some(match code {
-        EXHAUSTED => Explained {
-            message: "Allowit did not evaluate this request: the owner of the policy has no credits left",
-            cause: "Allowit charges the policy owner one credit for each request, whatever its outcome, and the owner has less than one. Nothing was signed or sent, and no credits were charged.",
-            fix: "Tell the owner to get credits from Allowit; the app shows the balance and how. You need no credits of your own. Then run the same command again with the same request ID.",
-        },
-        INSUFFICIENT => Explained {
-            message: "The request is denied: the policy needed a metered call that the owner's credits do not cover",
-            cause: "The policy looks something up or asks a model before it decides. The owner's credits cover the request and not that call, so the call was not made.",
-            fix: "Tell the owner to get credits from Allowit. Then send the request again with a new request ID. Do not work around the denial.",
-        },
-        ALLOWANCE => Explained {
-            message: "The request is denied: the analysis allowance of the policy is used up for today",
-            cause: "The owner limits how many search and model calls the policy may make each day, and how many credits they may cost. This request needed one more.",
-            fix: "Tell the owner to raise the analysis allowance of the policy in the app, or wait until 00:00 UTC. Then send the request again with a new request ID.",
-        },
-        RUNNING => Explained {
-            message: "Allowit is evaluating this request now",
-            cause: "An earlier call with the same request ID has not ended.",
-            fix: "Read the request with `allowit status ID --wait 60s`, with the same request ID.",
-        },
-        UNAVAILABLE => Explained {
-            message: "Allowit released no decision: its credit ledger did not answer",
-            cause: "The server could not reserve or save the charge of this request. Nothing was signed or sent.",
-            fix: "Run the same command again with the same request ID.",
-        },
-        _ => return None,
-    })
-}
-
 /// True for a refusal of a request that Allowit may have charged. The owner
 /// pays for each request that Allowit evaluates, whatever its outcome: a
 /// denial of the policy, of the server's policy runner or of a decision
@@ -411,30 +374,6 @@ mod tests {
         ] {
             assert!(Charge::of(&bad).is_none(), "{bad}");
         }
-    }
-
-    #[test]
-    fn each_credit_refusal_has_a_cause_and_a_fix_for_the_owner() {
-        for code in [EXHAUSTED, INSUFFICIENT, ALLOWANCE] {
-            let text = explained(code).unwrap();
-            assert!(text.fix.contains("owner"), "{code}");
-            assert!(!text.cause.is_empty() && !text.message.is_empty());
-        }
-        // The agent never needs credits of its own.
-        assert!(
-            explained(EXHAUSTED)
-                .unwrap()
-                .fix
-                .contains("You need no credits of your own")
-        );
-        assert!(explained(RUNNING).unwrap().fix.contains("allowit status"));
-        assert!(
-            explained(UNAVAILABLE)
-                .unwrap()
-                .fix
-                .contains("same request ID")
-        );
-        assert!(explained("policy_denied").is_none());
     }
 
     #[test]
