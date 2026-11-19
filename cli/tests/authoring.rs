@@ -462,6 +462,25 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         "{}",
         stderr(&output)
     );
+    // The rail's storage of the contract's keys: nine keys that the contract keeps are one more
+    // than it stores, and the rail's own check refuses them, as its build would. Keys that the
+    // server keeps do not count.
+    let writes: String = (1..=9)
+        .map(|i| format!("    allowit::set_state(ctx, \"k{i}\", ctx.request.amount)?;\n"))
+        .collect();
+    let nine = include_str!("../templates/policy/src/policy.rs")
+        .replace("    Ok(())\n}", &format!("{writes}    Ok(())\n}}"));
+    std::fs::write(sandbox.work().join("nine.rs"), &nine).unwrap();
+    refused(
+        &["policy", "check", "nine.rs", "--kind", "custom"],
+        &["at most 8"],
+    );
+    let eight = nine.replace(
+        "    allowit::set_state(ctx, \"k9\", ctx.request.amount)?;\n",
+        "",
+    );
+    std::fs::write(sandbox.work().join("eight.rs"), &eight).unwrap();
+    sandbox.json(&["policy", "check", "eight.rs", "--kind", "custom"]);
     // The contract must know each key before it runs.
     let dynamic = plain_write.replace(
         "allowit::set_state(ctx, \"last\", ctx.request.amount)?;",

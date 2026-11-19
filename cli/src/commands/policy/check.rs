@@ -135,6 +135,24 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     let onchain = (kind == Some(WalletKind::Custom))
         .then(|| allowit_sdk::authoring::onchain_part(&source))
         .transpose()?;
+    // The rail's Custom wallet holds the part within its own limits, such as its storage of the
+    // state keys that the contract keeps: the rail's own check refuses what its build would. The
+    // rail is the selected one (`--rail`, `ALLOWIT_RAIL`), or else every rail that builds a
+    // Custom wallet.
+    if onchain.is_some() {
+        let rails: Vec<&str> = match cx.global.rail.as_deref() {
+            Some(rail) => vec![crate::routing::normalize(rail)?],
+            None => allowit_sdk::routing::all()
+                .iter()
+                .map(|rail| rail.id)
+                .collect(),
+        };
+        for network in rails {
+            if allowit_sdk::custom_build::supported(network) {
+                allowit_sdk::custom_build::check(network, &source)?;
+            }
+        }
+    }
     // The server evaluates the whole policy of a keypair wallet and of a Custom wallet. A Simple
     // or Standard wallet holds its source: its rail also checks it with the portable profile.
     let server_profile = matches!(kind, Some(WalletKind::Native | WalletKind::Custom));
