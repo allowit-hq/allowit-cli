@@ -95,8 +95,7 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     ] {
         let checked = sandbox.json(args);
         assert_eq!(checked["profile"], "server", "{args:?}");
-        // Only Core's derivation for a Custom wallet states a placement.
-        assert!(checked["placement"].is_null(), "{args:?}");
+        assert_eq!(checked["placement"], "server", "{args:?}");
         assert_eq!(checked["serverFunctions"], called, "{args:?}");
         assert_eq!(checked["prefix"], serde_json::json!(["payment_limit"]));
         assert_eq!(checked["sourceHash"], allowit_sdk::digest(asks.as_bytes()));
@@ -212,8 +211,10 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
 
     // Owner text without a server function: only a keypair wallet's policy.
     let checked = sandbox.json(&["policy", "check", "reads.rs"]);
-    assert_eq!(checked["profile"], "server");
-    assert!(checked["placement"].is_null());
+    assert_eq!(
+        (&checked["profile"], &checked["placement"]),
+        (&serde_json::json!("server"), &serde_json::json!("server"))
+    );
     assert_eq!(checked["serverFunctions"], serde_json::json!([]));
     for kind in ["simple", "standard"] {
         refused(
@@ -248,10 +249,17 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     std::fs::write(sandbox.work().join("custom.rs"), &custom).unwrap();
     let native = sandbox.json(&["policy", "check", "custom.rs", "--kind", "native"]);
     assert_eq!(
-        (&native["profile"], &native["canonicalOnly"]),
-        (&serde_json::json!("server"), &serde_json::json!(false))
+        (
+            &native["profile"],
+            &native["placement"],
+            &native["canonicalOnly"]
+        ),
+        (
+            &serde_json::json!("server"),
+            &serde_json::json!("server"),
+            &serde_json::json!(false)
+        )
     );
-    assert!(native["placement"].is_null());
     assert_eq!(native["serverFunctions"], serde_json::json!([]));
     for kind in ["simple", "standard"] {
         refused(

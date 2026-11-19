@@ -24,8 +24,9 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n
 /// key with its keeper: the wallet contract keeps a key when a step that uses it stays and no
 /// step that writes it leaves, and the server keeps every other key. --onchain prints the
 /// on-chain part itself. A policy that writes state is refused for every other kind, also when
-/// the kind is resolved without --kind. Only a Custom wallet's result states its placement: the
-/// on-chain part that its contract runs and the part that the server evaluates.
+/// the kind is resolved without --kind. The result states the placement of a keypair wallet's
+/// policy (the server) and of a Custom wallet's (the contract runs the on-chain part, the server
+/// the part that left), and none for a Simple or Standard wallet.
 ///
 /// A decision question that the source states as a literal and that asks an amount, an address,
 /// a price or a date gets a warning: a rule checks such a detail exactly.
@@ -194,17 +195,17 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         cx.out.source(&part.source);
         return Ok(0);
     }
-    // Where the policy is enforced, only where Core's derivation states it: the contract of a
-    // Custom wallet runs the on-chain part, and the server evaluates the part that left. The
-    // canonical rules that a Simple or Standard wallet runs on chain are those that its
-    // installation binds, which this check does not read: it states no placement for them.
-    let placement = onchain.as_ref().map(|part| {
-        if part.source == source {
-            "contract"
-        } else {
-            "contract and server"
-        }
-    });
+    // Where the policy is enforced. The server evaluates the whole policy of a keypair wallet.
+    // Core's derivation states it for a Custom wallet: the contract runs the on-chain part, and
+    // the server evaluates the part that left. The canonical rules that a Simple or Standard
+    // wallet runs on chain are those that its installation binds, which this check does not
+    // read: it states no placement for them, nor for a policy whose kind it does not know.
+    let placement = match (kind, &onchain) {
+        (Some(WalletKind::Native), _) => Some("server"),
+        (_, Some(part)) if part.source == source => Some("contract"),
+        (_, Some(_)) => Some("contract and server"),
+        _ => None,
+    };
     let view = onchain.as_ref().map(onchain_view);
     // A question that asks a detail that a rule checks exactly leaves the result unchanged.
     for warning in super::details::warnings(&source) {
