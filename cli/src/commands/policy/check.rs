@@ -13,7 +13,8 @@ pub(crate) const EXAMPLES: &str = "Examples:\n  allowit policy check policy.rs\n
 /// and the text of an owner param, read with as_str(). A Simple or Standard wallet holds its
 /// source on chain: that source is checked with the portable profile, also when it calls a
 /// server function, which the server evaluates before it co-signs. Without --kind, a policy
-/// that only the server profile admits is checked as a keypair wallet's policy.
+/// that writes state is checked as a Custom wallet's policy, the only kind that holds it, and
+/// any other policy that only the server profile admits as a keypair wallet's policy.
 ///
 /// A Custom wallet (--kind custom) takes one source too, checked with the server profile. The
 /// server evaluates all of it before it co-signs. The wallet contract compiles the on-chain
@@ -99,7 +100,7 @@ pub(crate) fn warn(cx: &mut Ctx, part: &allowit_sdk::authoring::Derived, source:
     }
     for check in part.server_only.iter().filter(|check| check.movable()) {
         cx.out.warning(format!(
-            "Line {}: {} runs only on the server, because {}. Move it out and the wallet contract enforces it too.",
+            "Line {}: {} runs only on the server, because {}. If it applies to every request, call it before that statement, with the values that it reads, and the wallet contract enforces it too.",
             check.line,
             check.check,
             cause(check.cause.code())
@@ -126,7 +127,9 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             ));
         }
         (Some(kind), _) => Some(kind),
-        // No kind: a policy that only the server profile admits is a keypair wallet's policy.
+        // No kind: only a Custom wallet holds a policy that keeps its own state, and a policy
+        // that only the server profile admits is otherwise a keypair wallet's policy.
+        (None, false) if server.shape.writes_state => Some(WalletKind::Custom),
         (None, false) if portable.is_err() => Some(WalletKind::Native),
         (None, false) => None,
     };
@@ -167,6 +170,17 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
             error
         })?
     };
+    // Only a Custom wallet keeps a policy's own state: its contract stores the keys of the
+    // on-chain part, and the server keeps the keys of the part that only it runs. Core's gate
+    // finds the state writes.
+    if let Some(kind @ (WalletKind::Native | WalletKind::Simple | WalletKind::Standard)) = kind
+        && shape.writes_state
+    {
+        return Err(Error::usage(format!(
+            "The {} wallet stores no policy state, and this policy writes state with allowit::set_state. Choose the Custom wallet, or state the limit with a canonical rule, which keeps its own figure.",
+            kind.id()
+        )));
+    }
     // The kinds take what the server binds to them. A keypair wallet takes any policy: the
     // server evaluates all of it. A Simple or Standard wallet takes the canonical rules, or a
     // policy that calls a server function, which the server evaluates before it co-signs:
@@ -177,17 +191,6 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     {
         return Err(Error::usage(format!(
             "The {} wallet takes the canonical rules, or a policy that calls a server function, and this policy has other custom code. Choose the Native wallet, where the server evaluates the whole policy, or the Custom wallet, whose contract runs it.",
-            kind.id()
-        )));
-    }
-    // Only a Custom wallet keeps a policy's own state: its contract stores the keys of the
-    // on-chain part, and the server keeps the keys of the part that only it runs. Core's gate
-    // finds the state writes.
-    if let Some(kind @ (WalletKind::Native | WalletKind::Simple | WalletKind::Standard)) = kind
-        && shape.writes_state
-    {
-        return Err(Error::usage(format!(
-            "The {} wallet stores no policy state, and this policy writes state with allowit::set_state. Choose the Custom wallet, or state the limit with a canonical rule, which keeps its own figure.",
             kind.id()
         )));
     }
@@ -207,6 +210,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
     if let Some(part) = &onchain {
         warn(cx, part, &source);
     }
+    // A question that asks a detail that a rule checks exactly leaves the result unchanged.
+    for warning in super::details::warnings(&source) {
+        cx.out.warning(warning);
+    }
     if args.onchain {
         let part = onchain.expect("the Custom kind derives the on-chain part");
         // With `--json` the part is the `source` field of one JSON object.
@@ -225,10 +232,6 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         _ => None,
     };
     let view = onchain.as_ref().map(onchain_view);
-    // A question that asks a detail that a rule checks exactly leaves the result unchanged.
-    for warning in super::details::warnings(&source) {
-        cx.out.warning(warning);
-    }
     cx.out.value(&serde_json::json!({"sourceHash":allowit_sdk::digest(source.as_bytes()),"profile":if server_profile {"server"} else {"portable"},"placement":placement,"serverFunctions":functions,"prefix":shape.prefix,"canonicalOnly":shape.canonical_only,"writesState":shape.writes_state,"compiled":args.compile,"onchain":view}));
     Ok(0)
 }

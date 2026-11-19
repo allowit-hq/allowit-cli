@@ -329,7 +329,7 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         "Line 12",
         "destinations runs only on the server",
         "a branch whose condition only the server can evaluate",
-        "Move it out",
+        "If it applies to every request, call it before that statement",
     ] {
         assert!(stderr(&output).contains(word), "{}", stderr(&output));
     }
@@ -421,13 +421,16 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     );
     assert_ne!(reads_and_writes, reads);
     std::fs::write(sandbox.work().join("reads-writes.rs"), &reads_and_writes).unwrap();
-    for args in [
-        &["policy", "check", "reads-writes.rs"][..],
+    refused(
         &["policy", "check", "reads-writes.rs", "--kind", "native"],
-    ] {
-        refused(args, &["The native wallet stores no policy state"]);
-    }
-    sandbox.json(&["policy", "check", "reads-writes.rs", "--kind", "custom"]);
+        &["The native wallet stores no policy state"],
+    );
+    // Without a kind, only a Custom wallet holds a policy that keeps state: the check takes that
+    // kind and runs its checks, as with `--kind custom`.
+    let custom = sandbox.json(&["policy", "check", "reads-writes.rs", "--kind", "custom"]);
+    let automatic = sandbox.json(&["policy", "check", "reads-writes.rs"]);
+    assert_eq!(automatic, custom);
+    assert_eq!(automatic["placement"], "contract and server");
     // A source with no server function that keeps state is its own on-chain part.
     let plain_write = include_str!("../templates/policy/src/policy.rs").replace(
         "    Ok(())\n}",
@@ -435,6 +438,13 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     );
     assert!(plain_write.contains("set_state"));
     std::fs::write(sandbox.work().join("plain-write.rs"), &plain_write).unwrap();
+    // A Simple or Standard wallet names the state first: the Native wallet keeps none either.
+    for kind in ["simple", "standard"] {
+        refused(
+            &["policy", "check", "plain-write.rs", "--kind", kind],
+            &["stores no policy state", "Choose the Custom wallet"],
+        );
+    }
     let output = sandbox.run(&[
         "--json",
         "policy",
@@ -471,10 +481,12 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
     let nine = include_str!("../templates/policy/src/policy.rs")
         .replace("    Ok(())\n}", &format!("{writes}    Ok(())\n}}"));
     std::fs::write(sandbox.work().join("nine.rs"), &nine).unwrap();
-    refused(
-        &["policy", "check", "nine.rs", "--kind", "custom"],
-        &["at most 8"],
-    );
+    for args in [
+        &["policy", "check", "nine.rs", "--kind", "custom"][..],
+        &["policy", "check", "nine.rs"],
+    ] {
+        refused(args, &["at most 8"]);
+    }
     let eight = nine.replace(
         "    allowit::set_state(ctx, \"k9\", ctx.request.amount)?;\n",
         "",
@@ -594,6 +606,15 @@ fn check_warns_when_a_question_asks_what_a_rule_checks() {
         stderr(&output),
         "warning: the decision question \"Is this payment for research data and at most 10 USDC?\" asks an amount (\"10 USDC\"); a decision model passes such mismatches, and a rule checks them exactly: for an amount, payment_limit, daily_spending_limit or custom code that compares ctx.request.amount with an amount param. Keep the question on what the payment is for\n"
     );
+    // `--onchain` keeps the warning on stderr; stdout carries only the part.
+    let output = sandbox.run(&["policy", "check", "amount.rs", "--onchain"]);
+    assert_eq!(code(&output), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("asks an amount (\"10 USDC\")"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("asks an amount"));
     let output = sandbox.run(&["policy", "check", "refund.rs"]);
     assert_eq!(code(&output), Some(0), "{}", stderr(&output));
     let warned = stderr(&output);
