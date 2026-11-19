@@ -98,7 +98,11 @@ mod tests {
         // The agent never needs credits of its own, and a request that was not evaluated keeps
         // its request ID.
         let exhausted = explained(&Error::refused(402, "credits_exhausted", "x")).unwrap();
-        assert!(exhausted.fix.contains("The agent needs no credits of its own"));
+        assert!(
+            exhausted
+                .fix
+                .contains("The agent needs no credits of its own")
+        );
         assert!(exhausted.fix.contains("same request ID"));
         // The catalogue states no outcome of the request, which only its sender knows.
         assert!(!exhausted.cause.to_ascii_lowercase().contains("nothing was"));
