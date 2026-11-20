@@ -503,6 +503,29 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         &["policy", "check", "dynamic.rs", "--kind", "custom"],
         &["string literal"],
     );
+    // A daily value that the contract keeps cannot decide a check that only the server runs:
+    // the contract counts the value's window in ledgers and does not run that check again, so
+    // Core refuses the source for a Custom wallet and says how to change it.
+    let permit = branched
+        .replace(
+            "    let score = allowit::decision(ctx,",
+            "    if ctx.request.amount < 10 {\n        allowit::set_state(ctx, \"day_permit\", true)?;\n    }\n    let score = allowit::decision(ctx,",
+        )
+        .replace(
+            "    if score < 9000 {\n",
+            "    if score < 9000 {\n        let permit: Option<bool> = allowit::get_state(ctx, \"day_permit\")?;\n        assert!(permit.is_some());\n",
+        );
+    assert!(
+        permit.contains("set_state(ctx, \"day_permit\"") && permit.contains("permit.is_some()")
+    );
+    std::fs::write(sandbox.work().join("permit.rs"), &permit).unwrap();
+    refused(
+        &["policy", "check", "permit.rs", "--kind", "custom"],
+        &[
+            "\"day_permit\", which the wallet contract keeps",
+            "Keep \"day_permit\" on the server",
+        ],
+    );
     // A read of a standard figure stays, and the wallet keeps that figure.
     let stored = branched.replace(
         "    let score = allowit::decision(ctx,",
