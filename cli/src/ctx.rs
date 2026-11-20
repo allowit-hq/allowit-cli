@@ -149,12 +149,20 @@ impl Ctx {
             })?;
         allowit_sdk::config::ServerAuthority::new(rail.id, &origin, &key)
     }
+    /// True when [`Self::confirm`] asks at a terminal: no `--yes`, and text output with a
+    /// terminal on stdin and stderr.
+    pub(crate) fn prompts(&self) -> bool {
+        !self.global.yes
+            && !self.out.compact
+            && std::io::stdin().is_terminal()
+            && std::io::stderr().is_terminal()
+    }
     /// Confirms a destructive action: `--yes`, or a prompt on a terminal.
     pub(crate) fn confirm(&mut self, question: &str) -> Result<()> {
         if self.global.yes {
             return Ok(());
         }
-        if self.out.compact || !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        if !self.prompts() {
             return Err(Error::usage(format!("{question}: pass --yes to confirm")));
         }
         crate::flush_stderr(&mut self.out.stderr);
