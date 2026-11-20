@@ -526,6 +526,21 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
             "Keep \"day_permit\" on the server",
         ],
     );
+    // The time of the request is such a value too: the server evaluates at the preparation, and
+    // the contract reads the time of the settlement ledger.
+    let timed = branched.replace(
+        "    if score < 9000 {\n",
+        "    if score < 9000 {\n        assert!(ctx.request.now % 2 == 0);\n",
+    );
+    assert!(timed.contains("ctx.request.now"));
+    std::fs::write(sandbox.work().join("timed.rs"), &timed).unwrap();
+    refused(
+        &["policy", "check", "timed.rs", "--kind", "custom"],
+        &[
+            "depends on the time of the request",
+            "Move the statement before the server function",
+        ],
+    );
     // A read of a standard figure stays, and the wallet keeps that figure.
     let stored = branched.replace(
         "    let score = allowit::decision(ctx,",
