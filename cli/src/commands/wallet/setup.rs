@@ -34,9 +34,14 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let local = owner::load(cx, &a.owner_key)?;
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
-    cx.confirm("Create this agent's wallet account from the owner's account and set its signers")?;
+    let context = local.context(&a.origin);
+    // The owner confirms the network and the amount. The amount is the one that the setup signs:
+    // the rail binds a request ID to its amount and refuses a retry with another one. The asset
+    // is not named: the rail takes it from the server's template, or from the transaction that
+    // a retried request signed before.
+    cx.confirm(&question(context.network, a.amount.as_deref()))?;
     cx.out.value(&allowit_sdk::owner::setup(
-        &local.context(&a.origin),
+        &context,
         allowit_sdk::owner::Setup {
             agent: &agent.address,
             server: &a.server,
@@ -46,4 +51,33 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
         },
     )?);
     Ok(0)
+}
+/// The question of a setup: its network and, with an amount, what the setup moves into the
+/// wallet.
+fn question(network: &str, amount: Option<&str>) -> String {
+    match amount {
+        Some(amount) => format!(
+            "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} of the wallet's asset plus the network's reserve and a fee float, and set its signers"
+        ),
+        None => format!(
+            "Create this agent's wallet account on {network} from the owner's account and set its signers"
+        ),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::question;
+
+    /// The owner confirms the network and the amount that the setup moves, and no asset.
+    #[test]
+    fn the_question_names_the_network_and_the_amount() {
+        assert_eq!(
+            question("net:test", Some("20")),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 of the wallet's asset plus the network's reserve and a fee float, and set its signers"
+        );
+        assert_eq!(
+            question("net:test", None),
+            "Create this agent's wallet account on net:test from the owner's account and set its signers"
+        );
+    }
 }
