@@ -35,23 +35,11 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     let context = local.context(&a.origin);
-    // A setup ID that the rail's journal holds resumes that setup: a transaction that was signed
-    // then keeps its own asset, so the question names none and no template is read. A new setup
-    // names its network and, with an amount, the asset that the rail reads from the server's
-    // template for a new wallet. The read signs the owner in, so it runs only for a question
-    // that the owner sees. With `--yes` no question is asked, so nothing is read.
-    let question = if cx.global.yes {
-        String::new()
-    } else if retained(&owner::status(cx, &a.request_id)) {
-        resumed(context.network, &a.request_id)
-    } else {
-        let asset = match a.amount {
-            Some(_) if cx.prompts() => Some(allowit_sdk::owner::native_wallet_asset(&context)?),
-            _ => None,
-        };
-        question(context.network, a.amount.as_deref(), asset.as_ref())
-    };
-    cx.confirm(&question)?;
+    // The owner confirms the network and the amount. The amount is the one that the setup signs:
+    // the rail binds a request ID to its amount and refuses a retry with another one. The asset
+    // is not named: the rail takes it from the server's template, or from the transaction that
+    // a retried request signed before.
+    cx.confirm(&question(context.network, a.amount.as_deref()))?;
     cx.out.value(&allowit_sdk::owner::setup(
         &context,
         allowit_sdk::owner::Setup {
@@ -64,91 +52,32 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     )?);
     Ok(0)
 }
-/// Whether the rail's journal may hold a setup under the ID, from its status read. Only the
-/// read's own answer that it holds no workflow under the ID makes a new setup; any other
-/// answer or failure claims less: the question then names no asset.
-fn retained(status: &Result<serde_json::Value>) -> bool {
-    !matches!(status, Err(error) if error.config && error.message == "No retained owner workflow has this ID")
-}
-/// The question of a setup that the rail's journal holds under `id`.
-fn resumed(network: &str, id: &str) -> String {
-    format!(
-        "Resume setup {id} of this agent's wallet account on {network}: a transaction that was signed before keeps its own asset, which is not shown here"
-    )
-}
-/// The question of a new setup: its network and, with an amount and the asset of the new wallet,
-/// what the setup moves into the wallet.
-fn question(
-    network: &str,
-    amount: Option<&str>,
-    asset: Option<&allowit_sdk::owner::NativeWalletAsset>,
-) -> String {
-    match (amount, asset) {
-        (Some(amount), Some(asset)) => {
-            let asset = match &asset.issuer {
-                Some(issuer) => format!("{} issued by {issuer}", asset.symbol),
-                None => asset.symbol.clone(),
-            };
-            format!(
-                "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} {asset} plus the network's reserve and a fee float, and set its signers"
-            )
-        }
-        _ => format!(
+/// The question of a setup: its network and, with an amount, what the setup moves into the
+/// wallet.
+fn question(network: &str, amount: Option<&str>) -> String {
+    match amount {
+        Some(amount) => format!(
+            "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} of the wallet's asset plus the network's reserve and a fee float, and set its signers"
+        ),
+        None => format!(
             "Create this agent's wallet account on {network} from the owner's account and set its signers"
         ),
     }
 }
 #[cfg(test)]
 mod tests {
-    use super::{question, resumed, retained};
-    use allowit_sdk::error::Error;
-    use allowit_sdk::owner::NativeWalletAsset;
+    use super::question;
 
-    /// The owner confirms the network, the amount and the asset that the setup moves.
+    /// The owner confirms the network and the amount that the setup moves, and no asset.
     #[test]
-    fn the_question_names_the_network_the_amount_and_the_asset() {
-        let asset = |symbol: &str, issuer: Option<&str>| NativeWalletAsset {
-            symbol: symbol.into(),
-            issuer: issuer.map(str::to_owned),
-        };
+    fn the_question_names_the_network_and_the_amount() {
         assert_eq!(
-            question("net:test", Some("20"), Some(&asset("COIN", None))),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 COIN plus the network's reserve and a fee float, and set its signers"
+            question("net:test", Some("20")),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 of the wallet's asset plus the network's reserve and a fee float, and set its signers"
         );
         assert_eq!(
-            question(
-                "net:test",
-                Some("2.5"),
-                Some(&asset("TOKEN", Some("ISSUER")))
-            ),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 2.5 TOKEN issued by ISSUER plus the network's reserve and a fee float, and set its signers"
-        );
-        assert_eq!(
-            question("net:test", None, None),
+            question("net:test", None),
             "Create this agent's wallet account on net:test from the owner's account and set its signers"
         );
-    }
-    /// Only the journal's answer that it holds no workflow under the ID makes a new setup.
-    #[test]
-    fn only_an_empty_journal_makes_a_new_setup() {
-        assert!(!retained(&Err(Error::config(
-            "No retained owner workflow has this ID"
-        ))));
-        assert!(retained(&Ok(serde_json::json!({"completed": false}))));
-        assert!(retained(&Err(Error::config(
-            "No native transaction is retained under this ID"
-        ))));
-        assert!(retained(&Err(Error::usage(
-            "Invalid owner workflow request ID"
-        ))));
-    }
-    /// A resume names its setup ID and network, and no asset or amount.
-    #[test]
-    fn a_resume_names_no_asset() {
-        let text = resumed("net:test", "setup-0001");
-        assert!(
-            text.starts_with("Resume setup setup-0001 of this agent's wallet account on net:test")
-        );
-        assert!(!text.contains("fund it"));
     }
 }
