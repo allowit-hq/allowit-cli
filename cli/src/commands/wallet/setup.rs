@@ -35,13 +35,14 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     let context = local.context(&a.origin);
-    let dir = cx.dir()?;
-    // A setup ID that this CLI started before resumes that setup: a transaction that was prepared
+    // A setup ID that the rail's journal holds resumes that setup: a transaction that was signed
     // then keeps its own asset, so the question names none and no template is read. A new setup
     // names its network and, with an amount, the asset that the rail reads from the server's
     // template for a new wallet. The read signs the owner in, so it runs only for a question
-    // that the owner sees.
-    let question = if started(&dir)?.load::<Started>(&a.request_id)?.is_some() {
+    // that the owner sees. With `--yes` no question is asked, so nothing is read.
+    let question = if cx.global.yes {
+        String::new()
+    } else if retained(&owner::status(cx, &a.request_id)) {
         resumed(context.network, &a.request_id)
     } else {
         let asset = match a.amount {
@@ -51,13 +52,6 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
         question(context.network, a.amount.as_deref(), asset.as_ref())
     };
     cx.confirm(&question)?;
-    // Kept before the setup signs anything, so a retry of this ID is a resume.
-    started(&dir)?.save(
-        &a.request_id,
-        &Started {
-            network: context.network.to_owned(),
-        },
-    )?;
     cx.out.value(&allowit_sdk::owner::setup(
         &context,
         allowit_sdk::owner::Setup {
@@ -70,24 +64,16 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     )?);
     Ok(0)
 }
-/// The CLI's own record of a setup ID that it started: only its network. The rail's journal
-/// holds the setup itself.
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Started {
-    network: String,
+/// Whether the rail's journal may hold a setup under the ID, from its status read. Only the
+/// read's own answer that it holds no workflow under the ID makes a new setup; any other
+/// answer or failure claims less: the question then names no asset.
+fn retained(status: &Result<serde_json::Value>) -> bool {
+    !matches!(status, Err(error) if error.config && error.message == "No retained owner workflow has this ID")
 }
-/// The private store of the setup IDs that this CLI started.
-fn started(dir: &std::path::Path) -> Result<allowit_sdk::Store> {
-    let path = dir.join("setups");
-    crate::settings::private_dir(&path)?;
-    allowit_sdk::Store::open(&path)
-        .map_err(|_| crate::error::Error::config("the setup records are unsafe or locked"))
-}
-/// The question of a setup that this CLI started before under `id`.
+/// The question of a setup that the rail's journal holds under `id`.
 fn resumed(network: &str, id: &str) -> String {
     format!(
-        "Resume setup {id} of this agent's wallet account on {network}: this CLI started it before, and a transaction that was prepared then keeps its own asset, which is not shown here"
+        "Resume setup {id} of this agent's wallet account on {network}: a transaction that was signed before keeps its own asset, which is not shown here"
     )
 }
 /// The question of a new setup: its network and, with an amount and the asset of the new wallet,
@@ -104,7 +90,7 @@ fn question(
                 None => asset.symbol.clone(),
             };
             format!(
-                "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} {asset} plus the network's reserve and fees, and set its signers"
+                "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} {asset} plus the network's reserve and a fee float, and set its signers"
             )
         }
         _ => format!(
@@ -114,7 +100,8 @@ fn question(
 }
 #[cfg(test)]
 mod tests {
-    use super::{question, resumed};
+    use super::{question, resumed, retained};
+    use allowit_sdk::error::Error;
     use allowit_sdk::owner::NativeWalletAsset;
 
     /// The owner confirms the network, the amount and the asset that the setup moves.
@@ -126,7 +113,7 @@ mod tests {
         };
         assert_eq!(
             question("net:test", Some("20"), Some(&asset("COIN", None))),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 COIN plus the network's reserve and fees, and set its signers"
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 COIN plus the network's reserve and a fee float, and set its signers"
         );
         assert_eq!(
             question(
@@ -134,12 +121,26 @@ mod tests {
                 Some("2.5"),
                 Some(&asset("TOKEN", Some("ISSUER")))
             ),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 2.5 TOKEN issued by ISSUER plus the network's reserve and fees, and set its signers"
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 2.5 TOKEN issued by ISSUER plus the network's reserve and a fee float, and set its signers"
         );
         assert_eq!(
             question("net:test", None, None),
             "Create this agent's wallet account on net:test from the owner's account and set its signers"
         );
+    }
+    /// Only the journal's answer that it holds no workflow under the ID makes a new setup.
+    #[test]
+    fn only_an_empty_journal_makes_a_new_setup() {
+        assert!(!retained(&Err(Error::config(
+            "No retained owner workflow has this ID"
+        ))));
+        assert!(retained(&Ok(serde_json::json!({"completed": false}))));
+        assert!(retained(&Err(Error::config(
+            "No native transaction is retained under this ID"
+        ))));
+        assert!(retained(&Err(Error::usage(
+            "Invalid owner workflow request ID"
+        ))));
     }
     /// A resume names its setup ID and network, and no asset or amount.
     #[test]

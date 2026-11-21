@@ -61,15 +61,15 @@ fn a_setup_without_yes_names_its_network_and_reaches_no_server() {
     });
 }
 
-/// A setup ID that this CLI started before is a resume: the question says so and names no asset,
-/// because the transaction that was prepared then keeps its own asset. The CLI reads no template
-/// for it, so the owner is not signed in before the answer.
+/// A setup is a resume only when the rail's journal holds its ID. A first attempt that stopped
+/// at an unreachable RPC endpoint left nothing in the journal, so its retry is a new setup: the
+/// question names its network and the setup that it creates, and no server is reached.
 #[test]
 #[cfg_attr(not(feature = "e2e"), ignore = "end-to-end: run with --features e2e")]
-fn a_retry_of_a_started_setup_names_no_asset_and_reaches_no_server() {
+fn a_retry_of_a_setup_that_left_no_journal_is_a_new_setup() {
     each_rail(Feature::OwnerSetup, |rail| {
         let server = server_key(rail, 1);
-        let mut sandbox = Sandbox::new("setup-resume");
+        let mut sandbox = Sandbox::new("setup-retry");
         let mock = Mock::new();
         sandbox.set("ALLOWIT_URL", &mock.url);
         sandbox.ok(&["--rail", rail.network, "rail", "use", rail.network]);
@@ -103,14 +103,19 @@ fn a_retry_of_a_started_setup_names_no_asset_and_reaches_no_server() {
         // The first run starts the setup and stops at the unreachable RPC endpoint.
         let first = setup(true);
         assert_ne!(code(&first), Some(0), "{}", stderr(&first));
-        // The retry asks again: a resume of the setup that was started before, with no asset.
+        // The retry asks again, for a new setup.
         let retry = setup(false);
         let text = stderr(&retry);
         assert_eq!(code(&retry), Some(2), "{text}");
         assert!(text.contains("pass --yes"), "{text}");
-        assert!(text.contains("Resume setup setup-0002"), "{text}");
-        assert!(text.contains(&format!("on {}", rail.network)), "{text}");
-        assert!(!text.contains("fund it with"), "{text}");
+        assert!(!text.contains("Resume"), "{text}");
+        assert!(
+            text.contains(&format!(
+                "Create this agent's wallet account on {} from",
+                rail.network
+            )),
+            "{text}"
+        );
         mock.assert_untouched();
     });
 }
