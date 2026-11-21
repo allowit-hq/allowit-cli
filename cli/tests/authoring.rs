@@ -538,7 +538,7 @@ fn check_uses_the_profile_of_the_wallet_kind_that_holds_the_policy() {
         &["policy", "check", "timed.rs", "--kind", "custom"],
         &[
             "depends on the time of the request",
-            "Move the statement before the server function",
+            "Check the time in a statement that the contract runs too",
         ],
     );
     // A read of a standard figure stays, and the wallet keeps that figure.
