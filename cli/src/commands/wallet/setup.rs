@@ -35,18 +35,29 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     let context = local.context(&a.origin);
-    // The owner confirms the network and, with an amount, the amount in the asset that the rail
-    // reads from the server's template for a new wallet. The read signs the owner in, so it runs
-    // only for a question that the owner sees.
-    let asset = match a.amount {
-        Some(_) if cx.prompts() => Some(allowit_sdk::owner::native_wallet_asset(&context)?),
-        _ => None,
+    let dir = cx.dir()?;
+    // A setup ID that this CLI started before resumes that setup: a transaction that was prepared
+    // then keeps its own asset, so the question names none and no template is read. A new setup
+    // names its network and, with an amount, the asset that the rail reads from the server's
+    // template for a new wallet. The read signs the owner in, so it runs only for a question
+    // that the owner sees.
+    let question = if started(&dir)?.load::<Started>(&a.request_id)?.is_some() {
+        resumed(context.network, &a.request_id)
+    } else {
+        let asset = match a.amount {
+            Some(_) if cx.prompts() => Some(allowit_sdk::owner::native_wallet_asset(&context)?),
+            _ => None,
+        };
+        question(context.network, a.amount.as_deref(), asset.as_ref())
     };
-    cx.confirm(&question(
-        context.network,
-        a.amount.as_deref(),
-        asset.as_ref(),
-    ))?;
+    cx.confirm(&question)?;
+    // Kept before the setup signs anything, so a retry of this ID is a resume.
+    started(&dir)?.save(
+        &a.request_id,
+        &Started {
+            network: context.network.to_owned(),
+        },
+    )?;
     cx.out.value(&allowit_sdk::owner::setup(
         &context,
         allowit_sdk::owner::Setup {
@@ -59,8 +70,28 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     )?);
     Ok(0)
 }
-/// The question of a setup: its network and, with an amount and the asset of the new wallet, what
-/// the setup moves into the wallet.
+/// The CLI's own record of a setup ID that it started: only its network. The rail's journal
+/// holds the setup itself.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Started {
+    network: String,
+}
+/// The private store of the setup IDs that this CLI started.
+fn started(dir: &std::path::Path) -> Result<allowit_sdk::Store> {
+    let path = dir.join("setups");
+    crate::settings::private_dir(&path)?;
+    allowit_sdk::Store::open(&path)
+        .map_err(|_| crate::error::Error::config("the setup records are unsafe or locked"))
+}
+/// The question of a setup that this CLI started before under `id`.
+fn resumed(network: &str, id: &str) -> String {
+    format!(
+        "Resume setup {id} of this agent's wallet account on {network}: this CLI started it before, and a transaction that was prepared then keeps its own asset, which is not shown here"
+    )
+}
+/// The question of a new setup: its network and, with an amount and the asset of the new wallet,
+/// what the setup moves into the wallet.
 fn question(
     network: &str,
     amount: Option<&str>,
@@ -73,7 +104,7 @@ fn question(
                 None => asset.symbol.clone(),
             };
             format!(
-                "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} {asset}, and set its signers"
+                "Create this agent's wallet account on {network} from the owner's account, fund it with {amount} {asset} plus the network's reserve and fees, and set its signers"
             )
         }
         _ => format!(
@@ -83,7 +114,7 @@ fn question(
 }
 #[cfg(test)]
 mod tests {
-    use super::question;
+    use super::{question, resumed};
     use allowit_sdk::owner::NativeWalletAsset;
 
     /// The owner confirms the network, the amount and the asset that the setup moves.
@@ -95,7 +126,7 @@ mod tests {
         };
         assert_eq!(
             question("net:test", Some("20"), Some(&asset("COIN", None))),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 COIN, and set its signers"
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 COIN plus the network's reserve and fees, and set its signers"
         );
         assert_eq!(
             question(
@@ -103,11 +134,20 @@ mod tests {
                 Some("2.5"),
                 Some(&asset("TOKEN", Some("ISSUER")))
             ),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 2.5 TOKEN issued by ISSUER, and set its signers"
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 2.5 TOKEN issued by ISSUER plus the network's reserve and fees, and set its signers"
         );
         assert_eq!(
             question("net:test", None, None),
             "Create this agent's wallet account on net:test from the owner's account and set its signers"
         );
+    }
+    /// A resume names its setup ID and network, and no asset or amount.
+    #[test]
+    fn a_resume_names_no_asset() {
+        let text = resumed("net:test", "setup-0001");
+        assert!(
+            text.starts_with("Resume setup setup-0001 of this agent's wallet account on net:test")
+        );
+        assert!(!text.contains("fund it"));
     }
 }
