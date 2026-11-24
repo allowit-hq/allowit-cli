@@ -121,15 +121,6 @@ fn exec_checks_the_server_key_and_the_policy_before_the_agent_signs() {
                 "server_key_differs",
             ),
             ((403, refusal.clone()), "not_policy_agent"),
-            // Everything that the server says holds: the ledger decides, and this endpoint
-            // does not answer.
-            (
-                (
-                    200,
-                    facts("active", &description.wallet, &description.server),
-                ),
-                "wallet_unverified",
-            ),
         ] {
             let server = answer(listener.try_clone().unwrap(), vec![reply]);
             let output = sandbox.run(&pay);
@@ -152,6 +143,36 @@ fn exec_checks_the_server_key_and_the_policy_before_the_agent_signs() {
                 "{refused}"
             );
         }
+        // Everything that the server says holds: the ledger decides, and this endpoint does not
+        // answer. That says nothing about the wallet: it is the network's failure, exit 7, and
+        // nothing was signed or sent.
+        let server = answer(
+            listener.try_clone().unwrap(),
+            vec![(
+                200,
+                facts("active", &description.wallet, &description.server),
+            )],
+        );
+        let output = sandbox.run(&pay);
+        let requests = server.join().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        assert!(
+            listener.accept().is_err(),
+            "the ledger case: a second request"
+        );
+        listener.set_nonblocking(false).unwrap();
+        assert_eq!(code(&output), Some(7), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("network unavailable"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            !stderr(&output).contains("wallet_unverified"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(requests.len(), 1, "only the agent's policy read");
         // A build-only request signs nothing, so it reads no policy from the server.
         let mut built = pay.to_vec();
         built.push("--build-only");

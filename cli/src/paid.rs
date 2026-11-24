@@ -33,6 +33,16 @@ use allowit_sdk::{
 use serde_json::{Value, json};
 use std::time::Duration;
 
+/// A seller that refused or failed the call that carried the payment. The payment can have taken
+/// effect, so the agent reads the request before it pays again; a failure before any payment
+/// keeps the SDK's `seller_failed`. Both exit with [`paid_service::SELLER_FAILED`].
+pub(crate) const SELLER_FAILED_AFTER_PAYMENT: &str = "seller_failed_after_payment";
+fn failed_after_payment(message: String) -> Error {
+    let mut error = paid_service::seller_failed(message);
+    error.api_code = Some(SELLER_FAILED_AFTER_PAYMENT.into());
+    error
+}
+
 /// One request for a resource that may need payment.
 pub(crate) struct Call {
     pub method: String,
@@ -479,9 +489,9 @@ pub(crate) fn fetch(cx: &mut Ctx, call: &Call) -> Result<Delivered> {
         "Presenting the proof of payment to the seller"
     });
     let second = paid_service::send(&request, Some(&proof))
-        .map_err(|error| paid_service::seller_failed(format!("{} {after}", error.message)))?;
+        .map_err(|error| failed_after_payment(format!("{} {after}", error.message)))?;
     if !(200..300).contains(&second.status) {
-        return Err(paid_service::seller_failed(format!(
+        return Err(failed_after_payment(format!(
             "the seller answered HTTP {} after the payment. {after}",
             second.status
         )));
@@ -565,6 +575,18 @@ pub(crate) fn document(delivered: &Delivered, max_body: Option<usize>) -> Value 
 mod tests {
     use super::*;
     use allowit_sdk::{execution::Quantity, input::asset::AssetDisplay};
+
+    #[test]
+    fn a_seller_that_fails_after_the_payment_has_its_own_code() {
+        // The same exit, and a code of its own in the catalogue. The step is the CLI's own text,
+        // which the caller ends with what the agent does before another payment.
+        let after = failed_after_payment("the seller answered HTTP 500 after the payment.".into());
+        assert_eq!(after.code, paid_service::SELLER_FAILED);
+        assert_eq!(after.api_code.as_deref(), Some(SELLER_FAILED_AFTER_PAYMENT));
+        assert!(allowit_sdk::errors::entry(SELLER_FAILED_AFTER_PAYMENT).is_some());
+        // A failure before the payment keeps the SDK's code and no catalogue code of its own.
+        assert_eq!(paid_service::seller_failed("x").api_code, None);
+    }
 
     fn challenge(id: Option<&str>) -> Challenge {
         Challenge {

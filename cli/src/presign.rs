@@ -240,13 +240,10 @@ fn check_ledger(
     authority: &ServerAuthority,
     profile: &Profile,
     rpc: &str,
-) -> std::result::Result<(), String> {
-    let check = || -> Result<()> {
-        allowit_sdk::runtime::Runtime::new(rail.id, rpc)?
-            .import(authority, profile.descriptor.get().as_bytes())?;
-        Ok(())
-    };
-    check().map_err(|error| error.message)
+) -> Result<()> {
+    allowit_sdk::runtime::Runtime::new(rail.id, rpc)?
+        .import(authority, profile.descriptor.get().as_bytes())?;
+    Ok(())
 }
 
 /// The policy as the server answers it to its agent, before a signature.
@@ -296,20 +293,22 @@ fn judge_policy(
     }
 }
 
-/// The wallet on the ledger, before a signature.
-fn judge_ledger(
-    rail: &RailInfo,
-    d: &Description,
-    check: std::result::Result<(), String>,
-) -> Result<()> {
-    check.map_err(|cause| {
-        refused(
+/// The wallet on the ledger, before a signature. A ledger that gave no readable answer says
+/// nothing about the wallet: that is the network's failure, with its own code and exit.
+fn judge_ledger(rail: &RailInfo, d: &Description, check: Result<()>) -> Result<()> {
+    use allowit_sdk::transport_failure::{Failure, classify, network_unavailable};
+    check.map_err(|error| match classify(&error) {
+        Failure::NetworkUnavailable | Failure::Unknown => network_unavailable(format!(
+            "the ledger check of wallet {} of policy {} on {}",
+            d.wallet, d.policy_id, rail.label
+        )),
+        Failure::Other => refused(
             "wallet_unverified",
             format!(
-                "wallet {} of policy {} does not hold this policy on {} now: {cause}. Nothing was signed. If the endpoint answers (allowit rail show), ask the owner whether the wallet still exists and still names your key.",
-                d.wallet, d.policy_id, rail.label
+                "wallet {} of policy {} does not hold this policy on {} now: {}. Nothing was signed. Ask the owner whether the wallet still exists and still names your key.",
+                d.wallet, d.policy_id, rail.label, error.message
             ),
-        )
+        ),
     })
 }
 
@@ -412,9 +411,17 @@ mod tests {
             "Native account not found",
             "Imported profile differs from current native policy or authority",
         ] {
-            let error = judge_ledger(rail(), &d, Err(cause.into())).unwrap_err();
+            let error = judge_ledger(rail(), &d, Err(Error::config(cause))).unwrap_err();
             assert!(error.message.contains(cause), "{}", error.message);
             assert_eq!(code(Err(error)).as_deref(), Some("wallet_unverified"));
         }
+        // A ledger that did not answer is the network's failure, not a wallet that changed.
+        let unreachable = allowit_sdk::transport_failure::network_unavailable("rail RPC");
+        let error = judge_ledger(rail(), &d, Err(unreachable)).unwrap_err();
+        assert_eq!(
+            error.code,
+            allowit_sdk::transport_failure::NETWORK_UNAVAILABLE
+        );
+        assert_eq!(error.api_code, None);
     }
 }
