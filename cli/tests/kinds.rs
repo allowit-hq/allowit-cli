@@ -482,12 +482,9 @@ fn a_native_draft_deploys_without_an_executable_and_a_contract_draft_needs_one()
         sandbox.ok(&["rail", "trust", "http://127.0.0.1:9", &server]);
         sandbox.ok(&["keys", "generate", "owner"]);
         sandbox.ok(&["keys", "generate", "agent"]);
-        let deploy = |kind: &str| {
-            let draft = sandbox.private_file(
-                &format!("{kind}-draft.json"),
-                &json!({"id": "policy-0001", "walletKind": kind}).to_string(),
-            );
-            sandbox.run(&[
+        let deploy_with = |kind: &str, draft: Value, extra: &[&str]| {
+            let draft = sandbox.private_file(&format!("{kind}-draft.json"), &draft.to_string());
+            let mut args = vec![
                 "--rpc-url",
                 "http://127.0.0.1:9",
                 "policy",
@@ -505,8 +502,36 @@ fn a_native_draft_deploys_without_an_executable_and_a_contract_draft_needs_one()
                 "deploy-0001",
                 "--fee-limit",
                 "2000000000",
-            ])
+            ];
+            args.extend_from_slice(extra);
+            sandbox.run(&args)
         };
+        let deploy =
+            |kind: &str| deploy_with(kind, json!({"id": "policy-0001", "walletKind": kind}), &[]);
+        // An empty executable file is no reviewed code. A draft whose kind the CLI does not read,
+        // which the rail would deploy as a Native wallet without code, never reaches the owner's
+        // confirmation with it: refused before any key or network access.
+        let empty = sandbox.private_file("empty.wasm", "");
+        for (kind, draft) in [
+            ("unnamed", json!({"id": "policy-0001"})),
+            (
+                "standard",
+                json!({"id": "policy-0001", "walletKind": "standard"}),
+            ),
+        ] {
+            let refused = deploy_with(kind, draft, &["--executable", empty.to_str().unwrap()]);
+            assert_eq!(code(&refused), Some(2), "{}", stderr(&refused));
+            assert!(
+                stderr(&refused).contains("empty.wasm is empty: name the reviewed wallet code with --executable, or leave it out for a Native draft"),
+                "{}",
+                stderr(&refused)
+            );
+            assert!(
+                !stderr(&refused).contains("pass --yes to confirm"),
+                "{}",
+                stderr(&refused)
+            );
+        }
         let contract = deploy("standard");
         assert_eq!(code(&contract), Some(2), "{}", stderr(&contract));
         assert!(

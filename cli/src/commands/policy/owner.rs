@@ -126,7 +126,18 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
         .and_then(|draft| allowit_sdk::generation::wallet_kind_of(&draft))
         == Some(allowit_sdk::generation::WalletKind::Native);
     let executable = match &a.executable {
-        Some(path) => read_input(path)?,
+        // An empty file is no reviewed code. The rail deploys a draft that its runtime names a
+        // Native wallet without code, so an empty executable would stand for none: refused here,
+        // before a key, the network or the owner's confirmation.
+        Some(path) => match read_input(path)? {
+            code if code.is_empty() => {
+                return Err(Error::usage(format!(
+                    "{} is empty: name the reviewed wallet code with --executable, or leave it out for a Native draft",
+                    path.display()
+                )));
+            }
+            code => code,
+        },
         None if native => Vec::new(),
         None => {
             return Err(Error::usage(
