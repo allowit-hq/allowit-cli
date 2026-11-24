@@ -240,12 +240,17 @@ pub fn assert_data(text: &str, what: &str) {
 pub fn public_profile_fixture(sandbox: &Sandbox, profile: &Value, backend: &str) {
     // The network of the profile, as the rail that decodes it reads it: the shape of a profile is
     // the rail's, and the network need not be one of its top-level fields.
+    // A profile that no rail decodes, such as one with signing material added, keeps a network
+    // field of its own for the store; the command under test refuses it.
     let bytes = serde_json::to_vec(profile).unwrap();
     let network = allowit_sdk::plugins::rails()
         .iter()
         .flat_map(|rail| rail.networks().iter().map(move |n| (*rail, n.id)))
         .find_map(|(rail, id)| rail.decode_profile(id, &bytes).ok().map(|(d, _)| d.network))
-        .expect("a registered rail decodes the profile fixture");
+        .map(Value::from)
+        .or_else(|| profile.get("network").cloned())
+        .or_else(|| profile.pointer("/config/network").cloned())
+        .expect("the network of the profile fixture");
     let store =
         allowit_sdk::Store::open(&sandbox.config().join("public-profiles/versions")).unwrap();
     store
@@ -254,6 +259,15 @@ pub fn public_profile_fixture(sandbox: &Sandbox, profile: &Value, backend: &str)
             &serde_json::json!({"schema":1,"network":network,"backend":backend,"descriptor":profile}),
         )
         .unwrap();
+}
+
+/// The description of a profile document, as its rail reads it: the wallet, the agent and the
+/// policy of a profile are the rail's, wherever its document keeps them.
+pub fn describe(rail: &Rail<'_>, profile: &Value) -> allowit_sdk::profiles::Description {
+    rail.plugin
+        .decode_profile(rail.network, &serde_json::to_vec(profile).unwrap())
+        .unwrap()
+        .0
 }
 
 /// One registered rail as the shared tests see it: its test network, a second

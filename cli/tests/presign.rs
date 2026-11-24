@@ -33,10 +33,19 @@ fn exec_checks_the_server_key_and_the_policy_before_the_agent_signs() {
     each_rail(Feature::Transfer, |rail| {
         let net = rail.network;
         let fixtures = rail.fixtures;
-        // The rail's profile fixture, with an agent key that this device holds.
-        let (agent, secret) = rail.account(31);
+        // The rail's profile fixture, with an agent key that this device holds: the fixture's own
+        // agent when the rail derives it from the fixture's agent seed, else a key put in its place.
+        // A rail whose wallet address or owner consent binds the agent keeps its fixture whole.
+        let keys = rail.plugin.keys();
+        let own = keys.derive(&fixtures.agent_seed).unwrap();
         let mut profile: Value = serde_json::from_slice(&fixtures.public_profile).unwrap();
-        profile["config"]["agent"] = json!(agent);
+        let (agent, secret) = if common::describe(rail, &profile).agent == own.address() {
+            (own.address().to_owned(), own.encoded_secret().to_string())
+        } else {
+            let (agent, secret) = rail.account(31);
+            profile["config"]["agent"] = json!(agent);
+            (agent, secret)
+        };
         let (description, _) = rail
             .plugin
             .decode_profile(net, &serde_json::to_vec(&profile).unwrap())
