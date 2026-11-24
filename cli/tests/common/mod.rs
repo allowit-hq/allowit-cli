@@ -238,12 +238,20 @@ pub fn assert_data(text: &str, what: &str) {
 /// Seeds an already verified public profile. Production installation uses
 /// the owner workflow export.
 pub fn public_profile_fixture(sandbox: &Sandbox, profile: &Value, backend: &str) {
+    // The network of the profile, as the rail that decodes it reads it: the shape of a profile is
+    // the rail's, and the network need not be one of its top-level fields.
+    let bytes = serde_json::to_vec(profile).unwrap();
+    let network = allowit_sdk::plugins::rails()
+        .iter()
+        .flat_map(|rail| rail.networks().iter().map(move |n| (*rail, n.id)))
+        .find_map(|(rail, id)| rail.decode_profile(id, &bytes).ok().map(|(d, _)| d.network))
+        .expect("a registered rail decodes the profile fixture");
     let store =
         allowit_sdk::Store::open(&sandbox.config().join("public-profiles/versions")).unwrap();
     store
         .save(
             "fixture",
-            &serde_json::json!({"schema":1,"network":profile["network"],"backend":backend,"descriptor":profile}),
+            &serde_json::json!({"schema":1,"network":network,"backend":backend,"descriptor":profile}),
         )
         .unwrap();
 }
