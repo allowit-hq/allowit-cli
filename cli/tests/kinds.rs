@@ -240,22 +240,47 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
                 let error: Value = serde_json::from_slice(&output.stderr).unwrap();
                 assert_eq!(error["error"]["api_code"], "wallet_kind_unsupported");
                 assert_eq!(error["error"]["code"], "rejected");
+                // The catalogue's title, the server's own text as the cause, and that text whole as
+                // `detail`.
+                let title = &allowit_sdk::errors::entry("wallet_kind_unsupported")
+                    .unwrap()
+                    .title;
+                assert_eq!(error["error"]["message"], title.as_str());
+                assert_eq!(error["error"]["cause"], refused.as_str());
+                assert!(error["error"].get("fix").is_none());
                 assert!(
-                    error["error"]["message"]
+                    error["error"]["detail"]
                         .as_str()
                         .unwrap()
                         .contains(&refused)
                 );
-                // The reason of the refusal details follows the message.
+                assert!(
+                    error["error"]["help"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with("/help/wallet_kind_unsupported")
+                );
+                // The reason of the refusal details stays beside them.
                 assert_eq!(error["error"]["reason"], reason);
             } else {
                 let text = stderr(&output);
+                let title = &allowit_sdk::errors::entry("wallet_kind_unsupported")
+                    .unwrap()
+                    .title;
+                // The title, then the server's own text as the cause and the step, once.
                 assert!(
-                    text.starts_with("error: wallet_kind_unsupported: "),
+                    text.starts_with(&format!(
+                        "error: wallet_kind_unsupported: {title}\ncause: {refused}\n"
+                    )),
                     "{text}"
                 );
-                assert!(text.contains(&refused), "{text}");
-                assert!(text.ends_with(&format!("\nreason: {reason}\n")), "{text}");
+                // The reason of the details follows the cause; the help page ends it.
+                assert!(
+                    text.contains(&format!("\nreason: {reason}\nhelp: ")),
+                    "{text}"
+                );
+                assert!(text.ends_with("/help/wallet_kind_unsupported\n"), "{text}");
+                assert_eq!(text.matches(&refused).count(), 1, "{text}");
             }
         }
     });
@@ -388,12 +413,17 @@ fn policy_kinds_server_refuses_an_invalid_list_and_prints_typed_refusals() {
         let refusal = json!({"error": "This network is not served", "code": "network_unsupported"});
         let (output, _) = against_stub(net, &args, 400, refusal);
         assert_eq!(code(&output), Some(4), "{}", stderr(&output));
+        // A code without a catalogue entry keeps the server's text and names its help page.
+        let text = stderr(&output);
+        let shown = text
+            .find("error: network_unsupported: ")
+            .map(|at| &text[at..])
+            .unwrap_or_default();
         assert!(
-            stderr(&output).ends_with(
-                "error: network_unsupported: Allowit returned HTTP 400: This network is not served\n"
-            ),
-            "{}",
-            stderr(&output)
+            shown.starts_with(
+                "error: network_unsupported: Allowit returned HTTP 400: This network is not served\nhelp: http://127.0.0.1:"
+            ) && shown.ends_with("/help/network_unsupported\n"),
+            "{text}"
         );
         let down = json!({"error": "Network unavailable", "code": "network_unavailable"});
         let (output, _) = against_stub(net, &args, 503, down);

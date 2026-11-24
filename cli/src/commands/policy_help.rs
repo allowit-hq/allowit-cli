@@ -172,7 +172,64 @@ fn unavailable(origin: &str, status: Option<u16>) -> Error {
     ));
     error.code = allowit_sdk::transport_failure::NETWORK_UNAVAILABLE;
     error.status = status;
+    error.api_code = Some(SERVICE_UNREACHABLE.into());
     error
+}
+
+/// The code of a server that did not answer.
+pub(crate) const SERVICE_UNREACHABLE: &str = "service_unreachable";
+/// The code of a server that is another release than this CLI: it does not know the route or
+/// the method of a policy read, or it takes the read from its own app only.
+pub(crate) const SERVER_RELEASE_DIFFERS: &str = "server_release_differs";
+
+/// A refusal of a policy read with no narrower cause above. A typed refusal keeps the server's
+/// code and text. A server of another release answers 405 (it takes this read by another
+/// method), or 403 without a code or with `app_origin_required` (it takes this read from its app
+/// only). That refusal keeps the server's own text after this CLI's line.
+fn refused(origin: &str, status: u16, body: &[u8], route: &str) -> Error {
+    let reply = serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
+    let code = reply["code"]
+        .as_str()
+        .filter(|code| allowit_sdk::errors::is_code(code));
+    // A sender's text of several lines stays: the output escapes its controls and indents its
+    // later lines. Other control characters, or text over the bound, leave this CLI's line.
+    let said = reply["error"].as_str().filter(|text| {
+        text.len() <= 300
+            && !text
+                .chars()
+                .any(|c| c.is_control() && c != '\n' && c != '\t')
+    });
+    let other_release = status == 405
+        || matches!(code, Some("app_origin_required" | "method_not_allowed"))
+        || (code.is_none() && status == 403);
+    if other_release {
+        let line = format!(
+            "{origin} does not serve {route} of this CLI. Check ALLOWIT_URL; when it names the Allowit server, install the CLI that this server serves"
+        );
+        return Error::refused(
+            status,
+            SERVER_RELEASE_DIFFERS,
+            match said {
+                Some(said) => format!("{line}. The server said: {said}"),
+                None => line,
+            },
+        );
+    }
+    match code {
+        Some(code) => {
+            let error = Error::refused(
+                status,
+                code,
+                said.unwrap_or("The policy request was refused"),
+            );
+            // The details of a typed refusal, such as its reason, print beside its cause.
+            match reply.get("details").filter(|details| details.is_object()) {
+                Some(details) => error.with_details(details.clone()),
+                None => error,
+            }
+        }
+        None => Error::api(status, "The policy request was refused"),
+    }
 }
 
 /// The refusal of a policy id that the server at `origin` does not hold. A server of an
@@ -188,9 +245,12 @@ fn unknown(origin: &str, body: &[u8], route: &str) -> Error {
             format!("{origin} has no policy with this id; copy the line from the app again"),
         )
     } else {
-        Error::api(
+        Error::refused(
             404,
-            format!("{origin} does not serve {route}; check ALLOWIT_URL"),
+            SERVER_RELEASE_DIFFERS,
+            format!(
+                "{origin} does not serve {route}. Check ALLOWIT_URL; when it names the Allowit server, install the CLI that this server serves"
+            ),
         )
     }
 }
@@ -232,7 +292,7 @@ pub(crate) fn fetch(cx: &mut Ctx, id: &str) -> Result<(String, Facts)> {
         status if status >= 500 => {
             return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
         }
-        status => return Err(Error::api(status, "The policy request was refused")),
+        status => return Err(refused(&origin, status, &response.body, "policy help")),
     }
     let facts: Facts = serde_json::from_slice(&response.body).map_err(|_| invalid())?;
     if facts.policy_id.as_deref().is_some_and(|named| named != id) {
@@ -271,18 +331,13 @@ pub(crate) fn read_as_agent(origin: &str, id: &str, signer: &LocalSigner) -> Res
             ));
         }
         404 => return Err(unknown(origin, &body, "the agent's policy read")),
-        // A server of an earlier release reads the policy with GET only.
-        405 => {
-            return Err(Error::api(
-                405,
-                format!("{origin} does not serve the agent's policy read; check ALLOWIT_URL"),
-            ));
-        }
         503 => return Err(unavailable(origin, Some(503))),
         status if status >= 500 => {
             return Err(Error::uncertain(format!("Allowit returned HTTP {status}")));
         }
-        status => return Err(Error::api(status, "The policy request was refused")),
+        // A server of an earlier release reads the policy with GET only, and takes a POST from
+        // its own app only.
+        status => return Err(refused(origin, status, &body, "the agent's policy read")),
     }
     let facts: Facts = serde_json::from_slice(&body).map_err(|_| invalid())?;
     if facts.policy_id.as_deref() != Some(id)
@@ -812,6 +867,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_typed_refusal_of_a_policy_read_keeps_the_sender_text_and_details() {
+        // A text of two lines and the reason in the details: both reach the output.
+        let body = br#"{"error":"The wallet kind is unavailable.\nSelect Native.","code":"wallet_kind_unsupported","details":{"reason":"no reviewed code"}}"#;
+        let error = refused("https://allowit.example", 400, body, "policy help");
+        assert_eq!(error.api_code.as_deref(), Some("wallet_kind_unsupported"));
+        assert!(
+            error
+                .message
+                .ends_with("The wallet kind is unavailable.\nSelect Native."),
+            "{}",
+            error.message
+        );
+        assert_eq!(error.detail("reason"), Some("no reviewed code"));
+        // A text with another control character leaves this CLI's line.
+        let body = br#"{"error":"bad\u001b[2J","code":"wallet_kind_unsupported"}"#;
+        let error = refused("https://allowit.example", 400, body, "policy help");
+        assert!(error.message.ends_with("The policy request was refused"));
+    }
+
+    #[test]
     fn server_values_enter_a_command_line_only_without_shell_characters() {
         for safe in [
             "https://rpc.example/v1",
@@ -864,6 +939,64 @@ mod tests {
         assert!(owner_words(&["x".repeat(MAX_OWNER_MESSAGE + 1)]).is_err());
         assert!(owner_words(&vec!["x".to_owned(); MAX_OWNER_MESSAGES + 1]).is_err());
         assert!(owner_words(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn another_release_keeps_the_server_text_and_any_405_is_one() {
+        let origin = "https://allowit.example";
+        let route = "policy help";
+        for (status, body) in [
+            (405, r#"{"error":"Use GET for the agent policy facts."}"#),
+            (
+                405,
+                r#"{"error":"Use GET for the agent policy facts.","code":"unsupported_method"}"#,
+            ),
+            (
+                405,
+                r#"{"error":"Method not allowed.","code":"method_not_allowed"}"#,
+            ),
+            (
+                403,
+                r#"{"error":"This request must come from the Allowit app."}"#,
+            ),
+            (
+                403,
+                r#"{"error":"Only the app.","code":"app_origin_required"}"#,
+            ),
+        ] {
+            let error = refused(origin, status, body.as_bytes(), route);
+            assert_eq!(
+                error.api_code.as_deref(),
+                Some(SERVER_RELEASE_DIFFERS),
+                "{body}"
+            );
+            assert_eq!(error.status, Some(status));
+            let said: Value = serde_json::from_str(body).unwrap();
+            assert!(
+                error.message.contains(&format!(
+                    "The server said: {}",
+                    said["error"].as_str().unwrap()
+                )),
+                "{}",
+                error.message
+            );
+        }
+        // A typed refusal of another kind keeps its code and the server's text.
+        let error = refused(
+            origin,
+            403,
+            br#"{"error":"Not the policy's agent.","code":"not_policy_agent"}"#,
+            route,
+        );
+        assert_eq!(error.api_code.as_deref(), Some("not_policy_agent"));
+        assert!(error.message.ends_with("Not the policy's agent."));
+        // A server text with a control character is not kept.
+        let error = refused(origin, 405, b"{\"error\":\"a\\u001b[2Jb\"}", route);
+        assert!(
+            !error.message.contains("The server said"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

@@ -85,7 +85,7 @@ pub(crate) struct Global {
     /// Print no progress on stderr
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
-    /// Print the resolved rail, wallet and config directory on stderr
+    /// Print the resolved rail, wallet and config directory, and a refusal's server text, on stderr
     #[arg(short, long, global = true)]
     pub verbose: bool,
     /// Disable color (NO_COLOR also disables it)
