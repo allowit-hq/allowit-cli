@@ -11,6 +11,7 @@ mod keys;
 mod mcp;
 mod policy;
 pub(crate) mod policy_help;
+mod price;
 mod rail;
 mod skills;
 mod status;
@@ -147,6 +148,8 @@ pub(crate) enum Command {
     Status(status::Args),
     #[command(before_help = history::EXAMPLES)]
     History(history::Args),
+    #[command(before_help = price::EXAMPLES)]
+    Price(price::Args),
     #[command(subcommand, before_help = skills::EXAMPLES)]
     Skills(skills::Command),
     #[command(before_help = call::CALL_EXAMPLES)]
@@ -449,6 +452,7 @@ pub(crate) fn dispatch(command: Command, cx: &mut Ctx) -> Result<i32> {
         Command::Exec(a) => exec::run(a, cx),
         Command::Status(a) => status::run(a, cx),
         Command::History(a) => history::run(a, cx),
+        Command::Price(a) => price::run(a, cx),
         Command::Skills(c) => skills::run(c, cx),
         Command::Call(a) => call::run_call(a, cx),
         Command::Curl(a) => call::run_curl(a, cx),

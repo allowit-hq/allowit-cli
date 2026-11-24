@@ -54,15 +54,19 @@ ALLOWIT_URL=https://staging.example allowit POLICY_ID help
 | --- | --- |
 | `awaiting_agent_key` | `rail use`, `keys generate agent`, `keys use agent`; then report the public key to the owner and run the command again |
 | `draft` | The owner has the key and has not signed: wait and run the command again |
-| `active` | The server key to compare with the app, then `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID`, `wallet use WALLET`; one example each of `exec`, `status` and `history`; the limits in the asset's unit |
+| `active` | The server key, which `wallet import` pins and the CLI checks before each signature; `rail use RAIL --rpc-url ENDPOINT`, `keys use NAME`, `wallet import --policy POLICY_ID --server-key KEY`, `wallet use WALLET`; the payees that the policy allows; one command each of `exec`, `status`, `history`, `skills search` and `call` (a paid service of the marketplace, paid through the same policy); the owner's instructions; the limits in the asset's unit |
 | `inactive` | Ask the owner |
 
-Its first rule is that the agent pays only when the owner asks: setting up is not a request, and the printed
-payment is an example. The command changes nothing: it pins no server key and imports no profile.
+Once the server admits the key, the help shows the owner's instructions: each message that the owner wrote when
+making the policy, as written, beside the limits (`ownerWords` in `--json`). Its first rules guide the start: start
+when the owner says so, or at once when the owner's instructions already say what to do; ask the owner when a
+request disagrees with them; never pay outside the policy. Setting up is not a task, and a printed command is not
+one. The payees that the policy lists are the owner's, not examples (`allowedPayees` in `--json`). The command changes nothing: it pins no server key and imports no profile.
 
 A policy id is a pointer, not a credential. By the id alone the server answers only what an agent needs before it
 proves its key: the state, the network and its endpoint, the wallet kind and the server key. The agent key, the
-wallet, the limits, the destinations, the profile and the credits need the agent's request proof, the bearer that
+owner's instructions, the wallet, the limits, the destinations, the profile and the credits need the agent's request
+proof, the bearer that
 `native/limits` takes: the help and `wallet import` sign `POST /api/agent/policy` with the local key. A device
 whose keys the server does not admit as the policy's agent gets no setup and no payment command. Every server value
 that enters a printed command is checked: an address of the rail, or a plain URL without a character that a shell
@@ -72,8 +76,9 @@ does not answer.
 `wallet import --policy POLICY_ID` reads the policy's profile with the selected agent key and verifies it as a file
 import does: against the server key and the rail's own endpoint. The server key comes from the public answer, which
 the owner compares with the key that the app shows. The import pins it for that server when the server has no pin
-yet. A pinned key differs from the answer: the import stops with `server_key_differs`. Only `rail trust` changes a
-pin.
+yet. A pinned key differs from the answer: the import stops with `server_key_differs`. The import line that the
+help prints names the key that the help showed (`--server-key KEY`), and the import stops the same way when the server
+answers another key. Only `rail trust` changes a pin.
 `rail use RAIL --rpc-url URL` keeps the endpoint
 for that rail, so later commands need no flag.
 [`skills/allowit/SKILL.md`](skills/allowit/SKILL.md) is the agent skill for the whole journey; `allowit guide`
@@ -115,7 +120,7 @@ allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|st
 allowit policy show [--source]
 allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile] [--onchain]
 allowit policy build POLICY_ID (--ticket TICKET --source-hash SHA256 | --owner-key NAME --origin ORIGIN [--server-key PUBLIC_KEY]) [--out WASM]
-allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE [--amount AMOUNT] [--fee-asset-amount AMOUNT]
+allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR [--executable WASM] --fee-limit FEE [--amount AMOUNT] [--fee-asset-amount AMOUNT]
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
 allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
 allowit policy export SELECTION --owner-key NAME --origin ORIGIN --activation-id ID
@@ -130,6 +135,7 @@ allowit policy rate POLICY_ID REQUEST_ID [--signal suitability|delivery|quality 
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
+allowit price VAULT | FROM TO --amount UNITS [--holder ADDR]
 allowit skills search QUERY | ls | show ENTRY
 allowit call ENTRY|URL --max-price ASSET:AMOUNT
 allowit curl URL --max-price ASSET:AMOUNT
@@ -224,8 +230,9 @@ allowit --json policy generate --owner-key owner --origin http://localhost:5173 
 
 The shared SDK client validates the exact sign-in message before requesting an owner signature.
 Its session stays in memory and is bound to that backend, Origin and owner account.
-`--new-wallet` requires an advertised contract-wallet template. To use an existing owner installation,
-replace it with `--installation ID` and that installation's kind. Selection never falls back between them.
+`--new-wallet` drafts for a wallet that the deployment creates: a Native wallet account, or a contract wallet from
+an advertised template. To use an existing owner installation, replace it with `--installation ID` and that
+installation's kind. Selection never falls back between them.
 `--kind` selects one of four wallet kinds. The SDK describes them, and each rail lists the kinds that it supports:
 
 `native` is the recommended kind: the agent's own wallet pays every x402 seller, and the seller's facilitator pays the network fee.
@@ -239,7 +246,7 @@ A contract wallet (`simple`, `standard`, `custom`) pays only sellers that accept
 | `custom` | A contract from the policy source enforces each step that the chain can check. Allowit checks the rest before it co-signs | As `simple` | As `simple` |
 
 `allowit policy kinds` prints each kind of the selected rail with its explanation, the sellers that it pays (`pays`), its network fee (`fee`), enforcement and custody, and for `standard` its supported params and their link. The recommended kind has the row `recommended  yes`. `policy generate --help` prints the same text.
-The owner of a `native` wallet first creates and funds the agent's wallet account with `allowit wallet setup --amount AMOUNT`: one owner transaction, from the owner's own account. The owner then drafts with `policy generate --kind native --installation ID` and approves it with `policy activate`. A Native deployment takes two owner signatures: the setup transaction and the approval.
+The owner of a `native` wallet drafts before the agent's key exists, as the app does: `policy generate --kind native --new-wallet`. The agent runs `allowit POLICY_ID help` with that draft's id and reports its key. `policy deploy` with the agent key and `--amount AMOUNT`, and no executable, then creates and funds the agent's wallet account in one owner transaction from the owner's own account, with the amount in the wallet's asset plus the network's reserve and a fee float, which the owner confirms; the server registers the account and binds the draft to it. `policy activate` of the deployment's output approves the policy. A Native deployment takes two owner signatures: the setup transaction and the approval. `allowit wallet setup` still sets up an account first, for a later draft with `--installation ID`.
 `allowit policy kinds --server` reads `GET /api/wallet-kinds` and prints the kinds that the `ALLOWIT_URL` server accepts on the rail. `--json` prints the list as an array.
 Kind ids are exact. A kind that the rail does not support exits 3 before any key or network access.
 The CLI selects the rail's wallet profile for the kind. A rail can install `simple` and `standard` through one profile.
@@ -289,6 +296,21 @@ Every amount is a quantity `{units, asset, text}`. Text output prints `text`, wh
 They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
 Original journal recovery does not require a new profile cache, current source approval or a new authority pin.
 It queries the configured settlement service for the original packet and verifies its receipt. It never prepares another payment.
+
+## Prices
+
+`allowit price` reads a price now with the selected rail's `price` evidence function, the observation that a
+server policy reads with `allowit::price`. It needs no key, server or credit, and it moves nothing.
+
+```sh
+allowit price VAULT                          # what one share of a SEP-56 vault pays, and the wallet's position
+allowit price VAULT --amount 500000000       # what redeeming that many share units pays
+allowit price native USDC --amount 50000000  # what selling 5 XLM pays at the best bids of the order book
+```
+
+For a vault, the vault itself names the price with its own valuation, read without a signature; `--holder`
+values another account's shares in place of the selected wallet's. A price is in units of the received asset for
+one unit of the sold one; `--json` prints the observation as the rail reports it, with prices scaled by 10^7.
 
 ## Marketplace and paid calls
 
@@ -475,7 +497,7 @@ Pass an independent RPC endpoint with `--rpc-url URL`, or configure it for the s
 Use stable request IDs to resume interrupted owner operations.
 
 1. Generate and review the public policy draft.
-2. For a contract wallet, supply the reviewed executable and run `policy deploy` with explicit agent and server addresses and `--amount`. The owner signs one transaction: it creates the wallet and moves the amount into it. A wallet of another asset than XLM also takes `--fee-asset-amount`, the XLM from which it repays network fees. The server uploads the code; the owner signs no upload. For a Custom wallet, build its code first with `policy build`; the server uploads that code.
+2. For a Native wallet, run `policy deploy` with the agent key, the server address and `--amount`, and no executable: one owner transaction creates the agent's wallet account and funds it with the amount plus the network's reserve and a fee float, and the server binds the draft to it. Its fee limit bounds the bid of that transaction. For a contract wallet, supply the reviewed executable and run `policy deploy` with explicit agent and server addresses and `--amount`. The owner signs one transaction: it creates the wallet and moves the amount into it. A wallet of another asset than XLM also takes `--fee-asset-amount`, the XLM from which it repays network fees. The server uploads the code; the owner signs no upload. For a Custom wallet, build its code first with `policy build`; the server uploads that code.
 3. Run `policy fund` to add funds to a deployed wallet later.
 4. Run `policy activate` for the exact source and parameters.
 5. Run `policy export` with the completed activation ID. This saves the verified public profile locally and prints its public descriptor.
@@ -506,7 +528,7 @@ allowit policy build POLICY_ID --owner-key owner --origin ORIGIN --out wallet.wa
 
 The command prints the `code hash`. A revised policy source needs a new build.
 
-For account policies, configure native roles with `wallet setup` before activation.
+For an account policy drafted for an installation, configure native roles with `wallet setup` before activation.
 The selected capability validates addresses, fee units, executable format and native signing intent.
 Use each command’s `--help` for its required files and flags.
 `policy owner-status ID` reads original owner receipts without the owner key or a new signature.

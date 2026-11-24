@@ -51,8 +51,14 @@ mod tests {
             "allowit exec --op transfer",
             "allowit status ID --wait 60s",
             "allowit history",
+            "allowit price VAULT",
             "- 20: the policy denied the request",
-            "pay without a request from the owner",
+            "the owner's instructions as written",
+            "the payees that the owner allows",
+            "allowit skills search WORDS",
+            "allowit call ENTRY --max-price ASSET:AMOUNT",
+            "start when the owner tells you to, or at once when the owner's instructions",
+            "pay outside the policy",
             "keys export",
         ] {
             assert!(guide.contains(part), "{part}");

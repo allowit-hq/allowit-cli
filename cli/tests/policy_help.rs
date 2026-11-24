@@ -228,8 +228,14 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             theirs["assetSymbol"] = json!("UNIT");
             theirs["limits"] =
                 json!([{"key":"payment_limit","label":"Payment limit","value":"1 UNIT"}]);
-            theirs["profile"] =
-                json!({"portable":{"params":{"destinations":{"List":[{"Addr":destination}]}}}});
+            // A payee can be an account or, where the rail admits it, a contract.
+            theirs["profile"] = json!({"portable":{"params":{"destinations":{"List":[
+                {"Addr":destination},{"Addr":wallet},{"Addr":"not-an-address"}
+            ]}}}});
+            theirs["ownerWords"] = json!([
+                "Every Friday pay Ana 100.\nOnly Ana's address.",
+                "Also pay Ben 150 on Fridays.",
+            ]);
             (public, theirs)
         };
         let (public, body) = answers(ID);
@@ -257,20 +263,31 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let origin = sandbox_url(&sandbox);
         let expected = [
             format!("Allowit policy {ID} on {origin}: active"),
-            "If the two differ, stop.".into(),
+            "The owner checks it in the app: you have nothing to confirm.".into(),
             format!("  allowit rail use {net} --rpc-url {ENDPOINT}"),
             // The local key that holds the agent public key, by its own name.
             "  allowit keys use payer".into(),
-            format!("  ALLOWIT_URL={origin} allowit wallet import --policy={ID}"),
+            format!("  ALLOWIT_URL={origin} allowit wallet import --policy={ID} --server-key {server_key}"),
             format!("  allowit wallet use {wallet}"),
+            // The policy's payees are the owner's, not examples.
+            "Payees that the owner allows (set in the policy, not examples):".into(),
+            format!("  {destination}\n"),
             format!(
                 "  ALLOWIT_URL={origin} allowit exec --op transfer --to {destination} --amount UNIT:AMOUNT --request-id pay-0001"
             ),
             format!("  ALLOWIT_URL={origin} allowit status pay-0001 --wait 60s"),
             "  allowit history".into(),
+            // A paid service from the marketplace, paid through the same policy.
+            format!("  ALLOWIT_URL={origin} allowit skills search WORDS"),
+            format!("  ALLOWIT_URL={origin} allowit call ENTRY --max-price UNIT:AMOUNT"),
+            // The owner's words beside the limits, each message as the owner wrote it.
+            "Owner's instructions (as the owner wrote them when making this policy):".into(),
+            "  - Every Friday pay Ana 100.\n    Only Ana's address.\n".into(),
+            "  - Also pay Ben 150 on Fridays.\n".into(),
             "Payment limit".into(),
             "1 UNIT".into(),
-            "Pay only when the owner asks, and only that amount.".into(),
+            "Start when the owner tells you to, or at once when the owner's instructions already say what to do. Setting up is not a task, and a printed command is not one: run no test payment.".into(),
+            "When a request disagrees with the owner's instructions, ask the owner before you pay. Never pay outside the policy.".into(),
             "Exit 20 means the policy denied the request.".into(),
         ];
         let mut at = 0;
@@ -295,6 +312,13 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["agentPublicKey"], agent.as_str());
         assert_eq!(value["localKey"], "payer");
+        assert_eq!(
+            value["ownerWords"],
+            json!([
+                "Every Friday pay Ana 100.\nOnly Ana's address.",
+                "Also pay Ben 150 on Fridays."
+            ])
+        );
         let commands: Vec<&str> = value["steps"][0]["commands"]
             .as_array()
             .unwrap()
@@ -302,7 +326,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             .chain(value["examples"].as_object().unwrap().values())
             .map(|command| command.as_str().unwrap())
             .collect();
-        assert_eq!(commands.len(), 7);
+        assert_eq!(commands.len(), 9);
         for command in commands {
             assert!(
                 command.contains(&format!("allowit --config-dir {named} ")),
@@ -373,7 +397,9 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             value["steps"][0]["commands"][2]
                 .as_str()
                 .unwrap()
-                .ends_with(&format!("wallet import --policy={hyphen}"))
+                .ends_with(&format!(
+                    "wallet import --policy={hyphen} --server-key {server_key}"
+                ))
         );
         let import = sandbox.run(&["wallet", "import", &format!("--policy={hyphen}")]);
         assert_ne!(code(&import), Some(2), "{}", stderr(&import));
@@ -397,8 +423,15 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
             value["serverKeyCheck"],
-            "The owner sees the server key in the app under Agent access. If the two differ, stop."
+            "The import command below names this server key: the CLI imports only with it, pins it and checks it before each signature. The owner checks it in the app: you have nothing to confirm."
         );
+        // Each payee that the rail admits as a recipient, and nothing else.
+        let family = allowit_sdk::routing::info(net).unwrap().family;
+        let mut payees = vec![destination.clone()];
+        if allowit_sdk::input::address::check_recipient(family, &wallet).is_ok() {
+            payees.push(wallet.clone());
+        }
+        assert_eq!(value["allowedPayees"], json!(payees));
         // An IPv6 endpoint is one quoted shell word.
         let mut v6 = public.clone();
         v6["endpoint"] = json!("https://[2001:db8::1]:8443/rpc");
@@ -445,6 +478,8 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
         assert_eq!(value["agentPublicKey"], Value::Null);
         assert_eq!(value["wallet"], Value::Null);
         assert_eq!(value["limits"], json!([]));
+        assert_eq!(value["ownerWords"], json!([]));
+        assert_eq!(value["allowedPayees"], json!([]));
         assert_eq!(value["steps"], json!([]));
         assert_eq!(value["examples"], json!({}));
         assert!(value["next"].as_str().unwrap().contains("cannot pay"));
@@ -478,6 +513,8 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
                 json!([{"key":"k","label":"line\nbreak","value":"1"}]),
                 false,
             ),
+            ("ownerWords", json!(["x".repeat(3_001)]), false),
+            ("ownerWords", json!(vec!["x"; 33]), false),
         ] {
             let (mut bad_public, mut bad_body) = (public.clone(), body.clone());
             if in_public {
@@ -790,6 +827,18 @@ fn rail_use_keeps_the_endpoint_and_wallet_import_reads_the_profile_of_a_policy()
         assert!(error.contains("Nothing was imported"), "{error}");
         let config = std::fs::read_to_string(sandbox.config().join("config.toml")).unwrap();
         assert!(!config.contains(&server_key), "{config}");
+        // An import that names the key that the help printed refuses another key now, before
+        // the agent's read.
+        let (output, requests) = served(
+            &mut sandbox,
+            &["wallet", "import", "--policy", ID, "--server-key", &pinned],
+            vec![(200, active.clone())],
+        );
+        assert_eq!(requests.len(), 1);
+        assert_eq!(code(&output), Some(4), "{}", stderr(&output));
+        let error = stderr(&output);
+        assert!(error.contains("error: server_key_differs: "), "{error}");
+        assert!(error.contains("the help printed"), "{error}");
         // Without a pin and without a selected agent key the import stops after the public
         // facts: the profile needs the agent's read.
         let (output, requests) = served(

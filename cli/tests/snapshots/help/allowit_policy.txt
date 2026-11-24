@@ -10,7 +10,8 @@ Examples:
 
 Commands:
   owner-status  Read original owner transaction receipts
-  deploy        Deploy a reviewed policy and executable
+  deploy        Deploy a reviewed policy: a contract wallet with its executable, or a Native wallet
+                account
   fund          Fund the selected policy wallet
   activate      Approve exact policy source and parameters
   export        Verify and cache the active public profile

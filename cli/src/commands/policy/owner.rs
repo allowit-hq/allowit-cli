@@ -6,7 +6,7 @@ use crate::{
 };
 use allowit_sdk::owner as shared;
 use std::path::PathBuf;
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes\n  allowit --rpc-url URL policy deploy native-draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --amount 10 --request-id deploy-0002 --fee-limit 2000000000 --yes";
 #[derive(clap::Args, Debug)]
 pub(crate) struct Session {
     /// Named local owner key, independent of the selected agent key
@@ -31,9 +31,9 @@ pub(crate) struct Deploy {
     /// Independent server signing address
     #[arg(long)]
     pub server: String,
-    /// Reviewed executable for the selected wallet capability
+    /// Reviewed executable of a contract wallet; a Native wallet is an account and takes none
     #[arg(long)]
-    pub executable: PathBuf,
+    pub executable: Option<PathBuf>,
     /// Total fee ceiling in the selected rail's base units
     #[arg(long)]
     pub fee_limit: String,
@@ -96,17 +96,73 @@ fn check(cx: &mut Ctx, id: &str) -> Result<()> {
     }
     Ok(())
 }
+/// The question of a deployment. A Native deployment creates the agent's wallet account with one
+/// owner setup, which moves the amount on top of the network's reserve and a fee float: the owner
+/// confirms the network and all of it, as `wallet setup` asks.
+fn deploy_question(native: bool, network: &str, amount: Option<&str>) -> String {
+    if !native {
+        return "Deploy and fund this exact policy wallet using the owner account".into();
+    }
+    let funding = match amount {
+        Some(amount) => {
+            format!("{amount} of the wallet's asset plus the network's reserve and a fee float")
+        }
+        None => "the network's reserve and a fee float".into(),
+    };
+    format!(
+        "Create this agent's wallet account on {network} from the owner's account, fund it with {funding}, set its signers, and bind this exact policy to it"
+    )
+}
 pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     check(cx, &a.session.request_id)?;
     let local = owner::load(cx, &a.session.owner_key)?;
     let agent = cx.key(&a.agent_key)?;
     agent.check_rail(cx.rail()?.id)?;
     let draft = read_input(&a.policy_file)?;
-    let executable = read_input(&a.executable)?;
-    cx.confirm("Deploy and fund this exact policy wallet using the owner account")?;
+    // A Native wallet is the agent's own account: its deployment creates and funds the account
+    // and binds the draft to it, and the rail refuses an executable for it.
+    let native = serde_json::from_slice::<serde_json::Value>(&draft)
+        .ok()
+        .and_then(|draft| allowit_sdk::generation::wallet_kind_of(&draft))
+        == Some(allowit_sdk::generation::WalletKind::Native);
+    // The confirmation follows the draft's kind as this command reads it; the rail signs by the
+    // kind of the draft's runtime. Each case where the two could differ is refused before a key,
+    // the network or the confirmation, so the owner never confirms one action and signs another:
+    // - a Native draft takes no executable: a draft whose runtime is a contract wallet then
+    //   reaches the rail without code, which the rail refuses before anything is signed;
+    // - a contract wallet draft takes a non-empty executable: a draft whose runtime is a Native
+    //   wallet then reaches the rail with code, which the rail refuses before anything is signed.
+    let executable = match (&a.executable, native) {
+        (Some(_), true) => {
+            return Err(Error::usage(
+                "A Native wallet is an account and runs no wallet code: deploy it without --executable",
+            ));
+        }
+        (Some(path), false) => match read_input(path)? {
+            code if code.is_empty() => {
+                return Err(Error::usage(format!(
+                    "{} is empty: name the reviewed wallet code with --executable",
+                    path.display()
+                )));
+            }
+            code => code,
+        },
+        (None, true) => Vec::new(),
+        (None, false) => {
+            return Err(Error::usage(
+                "A contract wallet deploys reviewed code: name it with --executable",
+            ));
+        }
+    };
+    let context = local.context(&a.session.origin);
+    cx.confirm(&deploy_question(
+        native,
+        context.network,
+        a.amount.as_deref(),
+    ))?;
     let network = cx.rail()?.id;
     let out = shared::deploy(
-        &local.context(&a.session.origin),
+        &context,
         shared::Deploy {
             draft: &draft,
             agent: &agent.address,
@@ -186,4 +242,26 @@ pub(crate) fn status(a: Status, cx: &mut Ctx) -> Result<i32> {
     let network = cx.rail()?.id;
     crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(code)
+}
+#[cfg(test)]
+mod tests {
+    use super::deploy_question;
+
+    /// The owner of a Native deployment confirms the network, the amount and the reserve with the
+    /// fee float that its setup moves; a contract wallet's question does not change.
+    #[test]
+    fn a_native_deployment_names_what_its_setup_moves() {
+        assert_eq!(
+            deploy_question(true, "net:test", Some("20")),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 of the wallet's asset plus the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+        );
+        assert_eq!(
+            deploy_question(true, "net:test", None),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+        );
+        assert_eq!(
+            deploy_question(false, "net:test", Some("20")),
+            "Deploy and fund this exact policy wallet using the owner account"
+        );
+    }
 }
