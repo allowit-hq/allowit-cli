@@ -485,13 +485,15 @@ fn a_native_draft_deploys_without_an_executable_and_a_contract_draft_needs_one()
             "{}",
             stderr(&contract)
         );
-        // A Native draft reaches the owner's confirmation, which names the account it creates.
+        // A Native draft reaches the owner's confirmation, which names the account it creates and
+        // what its setup moves: the network's reserve and a fee float.
         let native = deploy("native");
         assert_eq!(code(&native), Some(2), "{}", stderr(&native));
         assert!(
-            stderr(&native).contains(
-                "Create and fund the agent's wallet account from the owner account, and bind this exact policy to it: pass --yes to confirm"
-            ),
+            stderr(&native).contains("Create this agent's wallet account on ")
+                && stderr(&native).contains(
+                    " from the owner's account, fund it with the network's reserve and a fee float, set its signers, and bind this exact policy to it: pass --yes to confirm"
+                ),
             "{}",
             stderr(&native)
         );

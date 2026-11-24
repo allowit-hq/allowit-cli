@@ -96,6 +96,23 @@ fn check(cx: &mut Ctx, id: &str) -> Result<()> {
     }
     Ok(())
 }
+/// The question of a deployment. A Native deployment creates the agent's wallet account with one
+/// owner setup, which moves the amount on top of the network's reserve and a fee float: the owner
+/// confirms the network and all of it, as `wallet setup` asks.
+fn deploy_question(native: bool, network: &str, amount: Option<&str>) -> String {
+    if !native {
+        return "Deploy and fund this exact policy wallet using the owner account".into();
+    }
+    let funding = match amount {
+        Some(amount) => {
+            format!("{amount} of the wallet's asset plus the network's reserve and a fee float")
+        }
+        None => "the network's reserve and a fee float".into(),
+    };
+    format!(
+        "Create this agent's wallet account on {network} from the owner's account, fund it with {funding}, set its signers, and bind this exact policy to it"
+    )
+}
 pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     check(cx, &a.session.request_id)?;
     let local = owner::load(cx, &a.session.owner_key)?;
@@ -117,14 +134,15 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
             ));
         }
     };
-    cx.confirm(if native {
-        "Create and fund the agent's wallet account from the owner account, and bind this exact policy to it"
-    } else {
-        "Deploy and fund this exact policy wallet using the owner account"
-    })?;
+    let context = local.context(&a.session.origin);
+    cx.confirm(&deploy_question(
+        native,
+        context.network,
+        a.amount.as_deref(),
+    ))?;
     let network = cx.rail()?.id;
     let out = shared::deploy(
-        &local.context(&a.session.origin),
+        &context,
         shared::Deploy {
             draft: &draft,
             agent: &agent.address,
@@ -204,4 +222,26 @@ pub(crate) fn status(a: Status, cx: &mut Ctx) -> Result<i32> {
     let network = cx.rail()?.id;
     crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(code)
+}
+#[cfg(test)]
+mod tests {
+    use super::deploy_question;
+
+    /// The owner of a Native deployment confirms the network, the amount and the reserve with the
+    /// fee float that its setup moves; a contract wallet's question does not change.
+    #[test]
+    fn a_native_deployment_names_what_its_setup_moves() {
+        assert_eq!(
+            deploy_question(true, "net:test", Some("20")),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 of the wallet's asset plus the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+        );
+        assert_eq!(
+            deploy_question(true, "net:test", None),
+            "Create this agent's wallet account on net:test from the owner's account, fund it with the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+        );
+        assert_eq!(
+            deploy_question(false, "net:test", Some("20")),
+            "Deploy and fund this exact policy wallet using the owner account"
+        );
+    }
 }
