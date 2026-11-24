@@ -578,14 +578,12 @@ mod tests {
 
     #[test]
     fn a_seller_that_fails_after_the_payment_has_its_own_code() {
-        // The same exit, and a code whose step reads the request before another payment.
+        // The same exit, and a code of its own in the catalogue. The step is the CLI's own text,
+        // which the caller ends with what the agent does before another payment.
         let after = failed_after_payment("the seller answered HTTP 500 after the payment.".into());
         assert_eq!(after.code, paid_service::SELLER_FAILED);
         assert_eq!(after.api_code.as_deref(), Some(SELLER_FAILED_AFTER_PAYMENT));
-        assert_eq!(
-            allowit_sdk::errors::entry(SELLER_FAILED_AFTER_PAYMENT).map(|entry| entry.retry),
-            Some(Some(allowit_sdk::errors::Retry::Final))
-        );
+        assert!(allowit_sdk::errors::entry(SELLER_FAILED_AFTER_PAYMENT).is_some());
         // A failure before the payment keeps the SDK's code and no catalogue code of its own.
         assert_eq!(paid_service::seller_failed("x").api_code, None);
     }

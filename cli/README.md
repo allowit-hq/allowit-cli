@@ -113,7 +113,7 @@ allowit wallet setup --owner-key NAME --agent-key NAME --server ADDR --request-i
 allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
-allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile]
+allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile] [--onchain]
 allowit policy build POLICY_ID (--ticket TICKET --source-hash SHA256 | --owner-key NAME --origin ORIGIN [--server-key PUBLIC_KEY]) [--out WASM]
 allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR --executable WASM --fee-limit FEE [--amount AMOUNT] [--fee-asset-amount AMOUNT]
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
@@ -236,7 +236,7 @@ A contract wallet (`simple`, `standard`, `custom`) pays only sellers that accept
 | `native` (recommended) | The agent's own wallet. Allowit checks each payment against the policy before it co-signs | Every x402 seller | The lowest: none when the seller's facilitator settles the payment |
 | `simple` | A contract wallet holds the funds. Allowit checks each payment, as for `native` | Fewer sellers: only those that accept a settled payment as proof | Higher: each payment runs the wallet contract on chain |
 | `standard` | A contract wallet enforces the standard rules on chain, for the [supported params](https://github.com/allowit-hq/allowit-core/blob/main/README.md#standard-wallet-parameters) | As `simple` | As `simple` |
-| `custom` | A contract built from the policy source enforces all of it on chain | As `simple` | As `simple` |
+| `custom` | A contract from the policy source enforces each step that the chain can check. Allowit checks the rest before it co-signs | As `simple` | As `simple` |
 
 `allowit policy kinds` prints each kind of the selected rail with its explanation, the sellers that it pays (`pays`), its network fee (`fee`), enforcement and custody, and for `standard` its supported params and their link. The recommended kind has the row `recommended  yes`. `policy generate --help` prints the same text.
 The owner of a `native` wallet first creates and funds the agent's wallet account with `allowit wallet setup --amount AMOUNT`: one owner transaction, from the owner's own account. The owner then drafts with `policy generate --kind native --installation ID` and approves it with `policy activate`. A Native deployment takes two owner signatures: the setup transaction and the approval.
@@ -398,7 +398,7 @@ The owner of a policy pays for compute, whatever the outcome. Each request that 
 - `allowit POLICY_ID help` prints what one request costs the owner, and says when the owner has no credits left.
 - The receipt of `exec`, `status` and `call` has a `credits` row: the credits charged, each item and the price list version. A call that is priced by its tokens shows what it used (`decision api 0.24 used`), a fee shows its cost and, for a network fee, the amount and rate (`network fee 0.156156 (0.0011154 <asset> at USD 0.14)`), and `inference` is the whole credits that the request paid for them. A fee that is known only after the payment, such as a settlement's network fee, is a later charge of the same request; `allowit status` shows it. In JSON it is `credits: {charged, tariff, lines, paidBy}`. The CLI reads it from `POST /api/agent/charge` of the policy's server, signed with the agent key; a server that does not answer leaves the receipt without the row.
 - A request that Allowit refused after it evaluated it prints the same `credits:` line on stderr, and `error.credits` in JSON: a policy denial (exit 20), a denial of a decision question, a request that waits for its owner, or a failed step. The owner paid for it. A denied request ID keeps its decision: use a new request ID to ask again.
-- A refusal that names credits prints the server's code, the cause and what the owner must do, as `cause:` and `fix:` lines, or `error.cause` and `error.fix` in JSON ([Errors](#errors)).
+- A refusal that names credits prints the server's code and its title, then the server's own text, which states the cause and what the owner must do, as the `cause:` line, or `error.cause` in JSON ([Errors](#errors)).
 
 | Code | Exit | Meaning | What to do |
 | --- | --- | --- | --- |
@@ -410,27 +410,27 @@ The owner of a policy pays for compute, whatever the outcome. Each request that 
 
 ### Errors
 
-A refusal of the server carries a typed code. For a code with an entry in the error catalogue of Allowit core, the
-command prints the catalogue's text, the same that the app shows:
+A typed refusal carries a code. For a code with an entry in the error catalogue of Allowit core, the command prints
+the entry's title, then the sender's own text as the cause and the step, the same that the app shows:
 
 ```text
-error: policy_denied: The policy denied the payment
-cause: The request breaks a rule of the policy, such as an amount limit, a recipient list or a time limit. The details name the rule. Nothing was paid.
+error: policy_denied: Policy denied
+cause: The policy denied this operation: `payment_limit` (PaymentLimitExceeded).
 rule: payment_limit
-fix: Do not retry the same request. Read the limits with allowit POLICY_ID help. Tell the owner which rule denied it.
 help: https://app.allowit.ai/help/policy_denied
-more: HTTP 409; add --verbose for the server's own text
 ```
 
-- `help:` is the page of the code on the `ALLOWIT_URL` origin. It shows the fix as numbered steps with pictures.
+- `help:` is the page of the code on the `ALLOWIT_URL` origin. It shows where in Allowit the step is.
 - `rule:` and `reason:` are the rule that denied a request and the reason of a refusal, from its details.
-- `--verbose` prints the server's own text as `server:`. With `--json` the error always holds it: `error.message` is
-  the title, and `error.cause`, `error.fix`, `error.help` and `error.detail` (the server's text) follow.
-- Only the catalogue writes `cause:` and `fix:`, and only this CLI writes `help:`. A second line of a sender's text
-  starts with two spaces, and its terminal control characters print as escapes.
-- A check of this CLI before it signs, such as `wallet_differs`, prints its own line, which names the keys and
-  wallets at hand, then the catalogue's `fix:` and `help:`. A code of a newer server that this release does not know
-  prints the server's text and `help:`.
+- The catalogue gives a cause or a step only for a code that its allow-lists name. Its cause then stands for the
+  sender's text on the `cause:` line, its step prints as `fix:`, and `--verbose` prints the server's own text as
+  `server:`. With `--json`, `error.message` is the title, and `error.cause`, `error.fix` (when listed), `error.help`
+  and `error.detail` (the sender's whole text) follow.
+- Only this CLI writes `fix:` and `help:`. A second line of a sender's text starts with two spaces, and its terminal
+  control characters print as escapes.
+- A check of this CLI before it signs, such as `wallet_differs`, prints its own text as the cause, which names the
+  keys and wallets at hand. A code of a newer server that this release does not know prints the server's text and
+  `help:`.
 - A server of another release than this CLI answers `server_release_differs`: install the CLI that the server
   serves with the install line of its app.
 

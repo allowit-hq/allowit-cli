@@ -4,7 +4,7 @@ Usage: allowit [OPTIONS] [COMMAND]
 
 Examples:
   allowit POLICY_ID help
-  allowit rail use <rail>
+  allowit rail use RAIL
   allowit keys generate agent
   allowit exec --op transfer --to DESTINATION --amount ASSET:5
   allowit status pay-0001 --wait 60s

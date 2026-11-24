@@ -240,21 +240,14 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
                 let error: Value = serde_json::from_slice(&output.stderr).unwrap();
                 assert_eq!(error["error"]["api_code"], "wallet_kind_unsupported");
                 assert_eq!(error["error"]["code"], "rejected");
-                // The catalogue's title, cause and next step; the server's own text is `detail`.
-                assert_eq!(
-                    error["error"]["message"],
-                    "This wallet kind cannot serve the policy"
-                );
-                assert!(
-                    error["error"]["cause"]
-                        .as_str()
-                        .is_some_and(|c| !c.is_empty())
-                );
-                assert!(
-                    error["error"]["fix"]
-                        .as_str()
-                        .is_some_and(|c| !c.is_empty())
-                );
+                // The catalogue's title, the server's own text as the cause, and that text whole as
+                // `detail`.
+                let title = &allowit_sdk::errors::entry("wallet_kind_unsupported")
+                    .unwrap()
+                    .title;
+                assert_eq!(error["error"]["message"], title.as_str());
+                assert_eq!(error["error"]["cause"], refused.as_str());
+                assert!(error["error"].get("fix").is_none());
                 assert!(
                     error["error"]["detail"]
                         .as_str()
@@ -271,25 +264,23 @@ fn a_typed_server_refusal_prints_the_server_code_and_reason() {
                 assert_eq!(error["error"]["reason"], reason);
             } else {
                 let text = stderr(&output);
+                let title = &allowit_sdk::errors::entry("wallet_kind_unsupported")
+                    .unwrap()
+                    .title;
+                // The title, then the server's own text as the cause and the step, once.
                 assert!(
-                    text.starts_with(
-                        "error: wallet_kind_unsupported: This wallet kind cannot serve the policy\ncause: "
-                    ),
+                    text.starts_with(&format!(
+                        "error: wallet_kind_unsupported: {title}\ncause: {refused}\n"
+                    )),
                     "{text}"
                 );
-                // The reason of the details follows the cause; the fix and the help page end it.
+                // The reason of the details follows the cause; the help page ends it.
                 assert!(
-                    text.contains(&format!("\nreason: {reason}\nfix: ")),
+                    text.contains(&format!("\nreason: {reason}\nhelp: ")),
                     "{text}"
                 );
-                assert!(text.contains("/help/wallet_kind_unsupported\n"), "{text}");
-                // The server's own text prints only with --verbose.
-                assert!(!text.contains(&refused), "{text}");
-                assert!(
-                    text.ends_with("; add --verbose for the server's own text\n")
-                        && text.contains("\nmore: HTTP "),
-                    "{text}"
-                );
+                assert!(text.ends_with("/help/wallet_kind_unsupported\n"), "{text}");
+                assert_eq!(text.matches(&refused).count(), 1, "{text}");
             }
         }
     });

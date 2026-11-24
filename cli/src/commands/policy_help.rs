@@ -162,7 +162,9 @@ fn refused(origin: &str, status: u16, body: &[u8], route: &str) -> Error {
         || matches!(code, Some("app_origin_required" | "method_not_allowed"))
         || (code.is_none() && status == 403);
     if other_release {
-        let line = format!("{origin} does not serve {route} of this CLI; check ALLOWIT_URL");
+        let line = format!(
+            "{origin} does not serve {route} of this CLI. Check ALLOWIT_URL, then install the CLI that this server serves"
+        );
         return Error::refused(
             status,
             SERVER_RELEASE_DIFFERS,
@@ -198,7 +200,9 @@ fn unknown(origin: &str, body: &[u8], route: &str) -> Error {
         Error::refused(
             404,
             SERVER_RELEASE_DIFFERS,
-            format!("{origin} does not serve {route}; check ALLOWIT_URL"),
+            format!(
+                "{origin} does not serve {route}. Check ALLOWIT_URL, then install the CLI that this server serves"
+            ),
         )
     }
 }

@@ -161,10 +161,11 @@ fn tools() -> Value {
     ])
 }
 
-/// A failed tool call: the CLI error with its exit code and the server's code. A refusal of the
-/// server whose code has an entry in the error catalogue carries the catalogue's title, cause,
-/// next step and help page, as the command line prints them, and the server's own text as
-/// `detail`. A denial that Allowit charged carries `credits`.
+/// A failed tool call: the CLI error with its exit code and the server's code. A typed refusal
+/// whose code has an entry in the error catalogue carries the catalogue's title, the sender's
+/// text as its cause and step (`cause`, or the catalogue's cause and `fix` for a code that its
+/// allow-lists name) and the help page, as the command line prints them, and the sender's own
+/// text as `detail`. A denial that Allowit charged carries `credits`.
 fn tool_error(
     error: &Error,
     request_id: Option<&str>,
@@ -190,9 +191,15 @@ fn tool_error(
     if let Some(reason) = error.detail("reason") {
         detail["reason"] = reason.into();
     }
+    // The sender's own text is the cause and the step, unless the catalogue lists them for the code.
+    let cause = explained
+        .as_ref()
+        .map(|text| text.cause.unwrap_or(crate::explain::sent(error)));
     if let Some(explained) = &explained {
-        detail["cause"] = explained.cause.into();
-        detail["fix"] = explained.fix.into();
+        detail["cause"] = cause.into();
+        if let Some(fix) = explained.fix {
+            detail["fix"] = fix.into();
+        }
         detail["detail"] = error.message.as_str().into();
     }
     if let Some(help) = &help {
@@ -208,8 +215,11 @@ fn tool_error(
         Some(code) => format!("{} ({code}): {message}", exit.name()),
         None => format!("{}: {message}", exit.name()),
     };
-    if let Some(explained) = &explained {
-        summary.push_str(&format!(". {} {}", explained.cause, explained.fix));
+    if let (Some(explained), Some(cause)) = (&explained, cause) {
+        summary.push_str(&format!(". {cause}"));
+        if let Some(fix) = explained.fix {
+            summary.push_str(&format!(" {fix}"));
+        }
         if let Some(rule) = error.detail("rule") {
             summary.push_str(&format!(" Rule: {rule}."));
         }
@@ -893,27 +903,24 @@ mod tests {
             "Allowit returned HTTP 409: DestinationNotAllowed"
         );
         // A price above the bound and a seller failure keep their own codes.
-        // A refusal that names credits tells the agent the cause and what the owner must do,
-        // as the command line does, and never the rail's text for an unresolved operation.
-        let allowance = Error::refused(
-            409,
-            "allowance_exhausted",
-            "the operation was not resolved; retain the original request ID",
-        );
+        // A refusal that names credits gives the agent the catalogue's title and the sender's own
+        // cause and step, as the command line does.
+        let said = "The analysis allowance of this policy is used up. Tell the owner to raise it.";
+        let allowance = Error::refused(409, "allowance_exhausted", said);
         let result = tool_error(&allowance, Some("paid-0002"), None);
         let detail = &result["structuredContent"]["error"];
         assert_eq!(detail["api_code"], "allowance_exhausted");
-        // The step of its retry kind: the request was not evaluated and goes again unchanged.
-        assert!(detail["fix"].as_str().unwrap().contains("same request ID"));
-        assert!(
-            !detail["message"]
-                .as_str()
+        assert_eq!(detail["cause"], said);
+        assert!(detail.get("fix").is_none());
+        assert_eq!(
+            detail["message"],
+            allowit_sdk::errors::entry("allowance_exhausted")
                 .unwrap()
-                .contains("retain the original")
+                .title
+                .as_str()
         );
         let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("raise the analysis allowance"), "{text}");
-        assert!(!text.contains("retain the original"), "{text}");
+        assert!(text.contains(said), "{text}");
         // A denial that Allowit charged carries what its evaluation cost the owner.
         let charge = crate::credits::Charge::of(&json!({
             "charged": "1.0", "tariff": "2026-11-14", "lines": [{"item": "base", "credits": "1.0"}],

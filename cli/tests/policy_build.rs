@@ -189,8 +189,9 @@ fn a_missing_build_tool_is_a_typed_refusal_that_says_what_to_install() {
             custom_build::code::TOOLCHAIN_MISSING,
             "{error}"
         );
+        // The catalogue's title, then the CLI's own text, which says what to install, as the cause.
         assert!(
-            error["error"]["message"]
+            error["error"]["cause"]
                 .as_str()
                 .unwrap()
                 .contains("Install"),

@@ -628,27 +628,34 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
             vec![(404, json!({"error":"Endpoint not found."}))],
         );
         assert_eq!(code(&output), Some(4), "{}", stderr(&output));
-        // The agent reads what happened and what to do, with the help page of the code.
+        // The agent reads the title of the code, then this CLI's own line about the route, which
+        // says what to do, and the help page of the code.
         let text = stderr(&output);
+        let title = |code: &str| allowit_sdk::errors::entry(code).unwrap().title.clone();
         assert!(
-            text.contains("error: server_release_differs: The CLI and the server are different releases\ncause: "),
+            text.contains(&format!(
+                "error: server_release_differs: {}\ncause: ",
+                title("server_release_differs")
+            )),
             "{text}"
         );
+        assert!(text.contains("does not serve policy help"), "{text}");
         assert!(
-            text.contains("\nfix: Check ALLOWIT_URL. Then install the CLI that this server serves"),
+            text.contains("Check ALLOWIT_URL, then install the CLI that this server serves"),
             "{text}"
         );
         assert!(text.contains("/help/server_release_differs\n"), "{text}");
-        // This CLI's own line about the route prints with --verbose.
-        assert!(!text.contains("does not serve policy help"), "{text}");
+        // The line prints once, also with --verbose.
         let (output, _) = served(
             &mut sandbox,
             &["--verbose", ID, "help"],
             vec![(404, json!({"error":"Endpoint not found."}))],
         );
-        assert!(
-            stderr(&output).contains("\nserver: ")
-                && stderr(&output).contains("does not serve policy help"),
+        assert_eq!(
+            stderr(&output)
+                .matches("does not serve policy help")
+                .count(),
+            1,
             "{}",
             stderr(&output)
         );
@@ -681,7 +688,10 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
         let (output, _) = served(&mut sandbox, &[ID, "help"], vec![(503, json!({}))]);
         assert_eq!(code(&output), Some(7), "{}", stderr(&output));
         assert!(
-            stderr(&output).contains("error: service_unreachable: Allowit did not answer\n"),
+            stderr(&output).contains(&format!(
+                "error: service_unreachable: {}\ncause: The Allowit server at ",
+                title("service_unreachable")
+            )) && stderr(&output).contains(" did not answer; check ALLOWIT_URL and retry\n"),
             "{}",
             stderr(&output)
         );
@@ -691,7 +701,8 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
         assert_eq!(code(&output), Some(7), "{}", stderr(&output));
         // The CLI's own line names the server that did not answer, with the help page.
         assert!(
-            stderr(&output).contains("error: service_unreachable: The Allowit server at http://127.0.0.1:1 did not answer"),
+            stderr(&output)
+                .contains("\ncause: The Allowit server at http://127.0.0.1:1 did not answer"),
             "{}",
             stderr(&output)
         );
