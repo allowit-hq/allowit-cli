@@ -135,6 +135,7 @@ allowit policy rate POLICY_ID REQUEST_ID [--signal suitability|delivery|quality 
 allowit exec --op transfer --to DESTINATION --amount ASSET:5 --request-id pay-0001
 allowit status pay-0001 --wait 60s
 allowit history
+allowit price VAULT | FROM TO --amount UNITS [--holder ADDR]
 allowit skills search QUERY | ls | show ENTRY
 allowit call ENTRY|URL --max-price ASSET:AMOUNT
 allowit curl URL --max-price ASSET:AMOUNT
@@ -295,6 +296,21 @@ Every amount is a quantity `{units, asset, text}`. Text output prints `text`, wh
 They print each param in human units, an amount with the unit of the installed asset. JSON keeps the stored `params` and adds `paramsDisplay` with each param's `label`, `shown` value and `unit`.
 Original journal recovery does not require a new profile cache, current source approval or a new authority pin.
 It queries the configured settlement service for the original packet and verifies its receipt. It never prepares another payment.
+
+## Prices
+
+`allowit price` reads a price now with the selected rail's `price` evidence function, the observation that a
+server policy reads with `allowit::price`. It needs no key, server or credit, and it moves nothing.
+
+```sh
+allowit price VAULT                          # what one share of a SEP-56 vault pays, and the wallet's position
+allowit price VAULT --amount 500000000       # what redeeming that many share units pays
+allowit price native USDC --amount 50000000  # what selling 5 XLM pays at the best bids of the order book
+```
+
+For a vault, the vault itself names the price with its own valuation, read without a signature; `--holder`
+values another account's shares in place of the selected wallet's. A price is in units of the received asset for
+one unit of the sold one; `--json` prints the observation as the rail reports it, with prices scaled by 10^7.
 
 ## Marketplace and paid calls
 
