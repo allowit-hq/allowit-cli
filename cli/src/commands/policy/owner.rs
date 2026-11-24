@@ -6,7 +6,7 @@ use crate::{
 };
 use allowit_sdk::owner as shared;
 use std::path::PathBuf;
-pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.wasm --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes\n  allowit --rpc-url URL policy deploy native-draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --amount 10 --request-id deploy-0002 --fee-limit 2000000000 --yes";
+pub(crate) const EXAMPLES: &str = "Examples:\n  allowit --rpc-url URL policy deploy draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --executable wallet.code --amount 10 --request-id deploy-0001 --fee-limit 2000000000 --yes\n  allowit --rpc-url URL policy deploy native-draft.json --owner-key owner --origin http://localhost:5173 --agent-key agent --server ADDRESS --amount 10 --request-id deploy-0002 --fee-limit 2000000000 --yes";
 #[derive(clap::Args, Debug)]
 pub(crate) struct Session {
     /// Named local owner key, independent of the selected agent key
