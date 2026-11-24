@@ -48,26 +48,40 @@ fn offline_help_examples_run_and_print_only_data() {
         sandbox.work().join("policy.rs"),
     )
     .unwrap();
-    // Every example that appears in help.
-    let mut examples = BTreeSet::new();
-    for path in allowit_cli::command_paths() {
-        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
-        args.push("--help");
-        let text = String::from_utf8(sandbox.run(&args).stdout).unwrap();
-        examples.extend(
-            text.lines()
-                .map(str::trim)
-                .filter(|l| l.starts_with("allowit "))
-                .map(str::to_owned),
-        );
-    }
+    // The rail that this test names in place of the examples' placeholder `RAIL`.
     let rails = sandbox.json(&["rail", "ls"]);
     let example_rail = rails
         .as_array()
         .unwrap()
         .first()
         .and_then(|rail| rail["rail"].as_str())
-        .expect("the build needs a registered rail for offline key examples");
+        .expect("the build needs a registered rail for offline key examples")
+        .to_owned();
+    // Every example that appears in help. No rail is selected yet, so each names the
+    // placeholder and none a registered rail.
+    let mut examples = BTreeSet::new();
+    for path in allowit_cli::command_paths() {
+        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
+        args.push("--help");
+        let text = String::from_utf8(sandbox.run(&args).stdout).unwrap();
+        for line in text.lines().map(str::trim) {
+            if !line.starts_with("allowit ") {
+                continue;
+            }
+            assert!(!line.contains(example_rail.as_str()), "{line}");
+            let words: Vec<_> = line
+                .split(' ')
+                .map(|w| {
+                    if w == "RAIL" {
+                        example_rail.as_str()
+                    } else {
+                        w
+                    }
+                })
+                .collect();
+            examples.insert(words.join(" "));
+        }
+    }
     let rail_use = format!("allowit rail use {example_rail}");
     let rail_show = format!("allowit rail show {example_rail} --json");
     let run_all = [
@@ -311,12 +325,20 @@ fn help_examples_follow_selection_without_creating_or_editing_settings() {
         String::from_utf8(output.stdout).unwrap()
     };
     let first_example = format!("allowit rail use {first}");
+    // Without a selection the examples name the placeholder, never a registered rail.
     let default_help = help(sandbox.run(&["rail", "use", "--help"]));
-    assert!(default_help.contains(&first_example), "{default_help}");
+    assert!(
+        default_help.contains("allowit rail use RAIL\n"),
+        "{default_help}"
+    );
     assert!(!default_help.contains("__ALLOWIT_EXAMPLE_RAIL__"));
     assert!(!sandbox.config().exists(), "help created settings");
     let guide = sandbox.ok(&["guide"]);
-    assert!(guide.contains(&first_example), "{guide}");
+    assert!(guide.contains("`allowit rail use RAIL`"), "{guide}");
+    for id in &ids {
+        assert!(!default_help.contains(id), "{default_help}");
+        assert!(!guide.contains(id), "{guide}");
+    }
     assert!(!sandbox.config().exists(), "guide created settings");
 
     let selected = ids.last().copied().unwrap();
@@ -355,14 +377,9 @@ fn help_examples_follow_selection_without_creating_or_editing_settings() {
 fn help_falls_back_for_unreadable_or_invalid_config_without_repairing_it() {
     let sandbox = common::Sandbox::new("help-config");
     let rails = sandbox.json(&["rail", "ls"]);
-    let Some(first) = rails
-        .as_array()
-        .unwrap()
-        .first()
-        .and_then(|rail| rail["rail"].as_str())
-    else {
+    if rails.as_array().unwrap().is_empty() {
         return;
-    };
+    }
     let path = sandbox.config().join("config.toml");
     for text in [
         "rail = [",
@@ -374,10 +391,7 @@ fn help_falls_back_for_unreadable_or_invalid_config_without_repairing_it() {
         assert_eq!(output.status.code(), Some(0));
         assert!(output.stderr.is_empty());
         let shown = String::from_utf8(output.stdout).unwrap();
-        assert!(
-            shown.contains(&format!("allowit rail use {first}")),
-            "{shown}"
-        );
+        assert!(shown.contains("allowit rail use RAIL\n"), "{shown}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         assert_eq!(std::fs::read_dir(sandbox.config()).unwrap().count(), 1);
     }

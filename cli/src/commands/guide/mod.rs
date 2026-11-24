@@ -26,13 +26,8 @@ pub(crate) struct Args {}
 
 pub(crate) fn run(_: Args, cx: &mut Ctx) -> Result<i32> {
     cx.out.raw = true;
-    // The example rail of help: the selected rail, or the first registered one.
+    // The example rail of help: the selected rail, or the placeholder `RAIL`.
     let rail = super::examples::render("__ALLOWIT_EXAMPLE_RAIL__", &cx.global);
-    let rail = if rail.is_empty() {
-        "RAIL".to_owned()
-    } else {
-        rail
-    };
     cx.out.stdout.push_str(&guide(&rail));
     Ok(0)
 }
