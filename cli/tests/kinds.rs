@@ -508,30 +508,63 @@ fn a_native_draft_deploys_without_an_executable_and_a_contract_draft_needs_one()
         };
         let deploy =
             |kind: &str| deploy_with(kind, json!({"id": "policy-0001", "walletKind": kind}), &[]);
-        // An empty executable file is no reviewed code. A draft whose kind the CLI does not read,
-        // which the rail would deploy as a Native wallet without code, never reaches the owner's
-        // confirmation with it: refused before any key or network access.
+        // The confirmation follows the kind that the CLI reads; the rail signs by the draft's
+        // runtime. Each case where the two could differ is refused before any key or network
+        // access, and before the owner's confirmation.
         let empty = sandbox.private_file("empty.wasm", "");
-        for (kind, draft) in [
-            ("unnamed", json!({"id": "policy-0001"})),
+        let code_file = sandbox.private_file("wallet.wasm", "\0asm");
+        let refusals = [
+            // An empty file is no reviewed code, for a draft whose kind the CLI does not read too.
+            (
+                "unnamed",
+                json!({"id": "policy-0001"}),
+                &empty,
+                "empty.wasm is empty: name the reviewed wallet code with --executable",
+            ),
             (
                 "standard",
                 json!({"id": "policy-0001", "walletKind": "standard"}),
+                &empty,
+                "empty.wasm is empty: name the reviewed wallet code with --executable",
             ),
-        ] {
-            let refused = deploy_with(kind, draft, &["--executable", empty.to_str().unwrap()]);
+            // A Native draft takes no executable, an empty one or one with code.
+            (
+                "native",
+                json!({"id": "policy-0001", "walletKind": "native"}),
+                &code_file,
+                "A Native wallet is an account and runs no wallet code: deploy it without --executable",
+            ),
+            (
+                "native",
+                json!({"id": "policy-0001", "walletKind": "native"}),
+                &empty,
+                "A Native wallet is an account and runs no wallet code: deploy it without --executable",
+            ),
+        ];
+        for (kind, draft, file, message) in refusals {
+            let refused = deploy_with(kind, draft, &["--executable", file.to_str().unwrap()]);
             assert_eq!(code(&refused), Some(2), "{}", stderr(&refused));
-            assert!(
-                stderr(&refused).contains("empty.wasm is empty: name the reviewed wallet code with --executable, or leave it out for a Native draft"),
-                "{}",
-                stderr(&refused)
-            );
+            assert!(stderr(&refused).contains(message), "{}", stderr(&refused));
             assert!(
                 !stderr(&refused).contains("pass --yes to confirm"),
                 "{}",
                 stderr(&refused)
             );
         }
+        // A contract wallet draft with its code reaches the contract wallet's confirmation.
+        let contract_code = deploy_with(
+            "standard",
+            json!({"id": "policy-0001", "walletKind": "standard"}),
+            &["--executable", code_file.to_str().unwrap()],
+        );
+        assert_eq!(code(&contract_code), Some(2), "{}", stderr(&contract_code));
+        assert!(
+            stderr(&contract_code).contains(
+                "Deploy and fund this exact policy wallet using the owner account: pass --yes to confirm"
+            ),
+            "{}",
+            stderr(&contract_code)
+        );
         let contract = deploy("standard");
         assert_eq!(code(&contract), Some(2), "{}", stderr(&contract));
         assert!(

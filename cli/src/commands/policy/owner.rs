@@ -125,21 +125,30 @@ pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
         .ok()
         .and_then(|draft| allowit_sdk::generation::wallet_kind_of(&draft))
         == Some(allowit_sdk::generation::WalletKind::Native);
-    let executable = match &a.executable {
-        // An empty file is no reviewed code. The rail deploys a draft that its runtime names a
-        // Native wallet without code, so an empty executable would stand for none: refused here,
-        // before a key, the network or the owner's confirmation.
-        Some(path) => match read_input(path)? {
+    // The confirmation follows the draft's kind as this command reads it; the rail signs by the
+    // kind of the draft's runtime. Each case where the two could differ is refused before a key,
+    // the network or the confirmation, so the owner never confirms one action and signs another:
+    // - a Native draft takes no executable: a draft whose runtime is a contract wallet then
+    //   reaches the rail without code, which the rail refuses before anything is signed;
+    // - a contract wallet draft takes a non-empty executable: a draft whose runtime is a Native
+    //   wallet then reaches the rail with code, which the rail refuses before anything is signed.
+    let executable = match (&a.executable, native) {
+        (Some(_), true) => {
+            return Err(Error::usage(
+                "A Native wallet is an account and runs no wallet code: deploy it without --executable",
+            ));
+        }
+        (Some(path), false) => match read_input(path)? {
             code if code.is_empty() => {
                 return Err(Error::usage(format!(
-                    "{} is empty: name the reviewed wallet code with --executable, or leave it out for a Native draft",
+                    "{} is empty: name the reviewed wallet code with --executable",
                     path.display()
                 )));
             }
             code => code,
         },
-        None if native => Vec::new(),
-        None => {
+        (None, true) => Vec::new(),
+        (None, false) => {
             return Err(Error::usage(
                 "A contract wallet deploys reviewed code: name it with --executable",
             ));
