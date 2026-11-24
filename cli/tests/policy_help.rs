@@ -641,7 +641,7 @@ fn an_unknown_id_a_missing_route_and_a_silent_server_have_their_own_exit_codes()
         );
         assert!(text.contains("does not serve policy help"), "{text}");
         assert!(
-            text.contains("Check ALLOWIT_URL, then install the CLI that this server serves"),
+            text.contains("Check ALLOWIT_URL; when it names the Allowit server, install the CLI that this server serves"),
             "{text}"
         );
         assert!(text.contains("/help/server_release_differs\n"), "{text}");

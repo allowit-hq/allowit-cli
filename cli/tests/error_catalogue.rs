@@ -47,6 +47,8 @@ fn codes_in(text: &str) -> Vec<String> {
         // A refusal that the CLI makes, with or without an HTTP status, which may be a call.
         format!(r#"refused\(\s*(?:[^,()"]+(?:\([^()]*\))?\s*,\s*)?{any}"#),
         format!(r"api_code\s*=\s*Some\(\s*{any}"),
+        // A typed refusal of a local check, by the SDK's constructor.
+        format!(r"Error::coded\(\s*{any}"),
         // A code that the CLI compares a refusal with.
         format!(r#"\["code"\]\s*==\s*{any}"#),
         // A string constant with a code-like value.
@@ -74,6 +76,7 @@ fn the_scan_reads_every_form_of_a_code() {
         Error::refused(status_of(reply), "after_a_call", "text")
         refused("no_status", "text")
         error.api_code = Some("set_code".into());
+        Error::coded("local_code", "text")
         if reply["code"] == "compared" {}
         const NAMED: &str = "named_code";
         let text = Some("Not a code");
@@ -86,6 +89,7 @@ fn the_scan_reads_every_form_of_a_code() {
             "after_a_call",
             "app_origin_required",
             "compared",
+            "local_code",
             "named_code",
             "no_status",
             "second_word",

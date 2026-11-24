@@ -275,17 +275,34 @@ impl Lookup {
 pub(crate) fn charged_denial(error: &Error) -> bool {
     error.code == crate::exit::Exit::Denied.code()
         // A refusal of the server: a check of this CLI before signing has no status and was
-        // never evaluated.
+        // never evaluated, and neither was a policy read that the server did not answer or that a
+        // server of another release refused.
         || (error.status.is_some()
-            && error
-                .api_code
-                .as_deref()
-                .is_some_and(|code| !matches!(code, EXHAUSTED | RUNNING | UNAVAILABLE)))
+            && error.api_code.as_deref().is_some_and(|code| {
+                !matches!(
+                    code,
+                    EXHAUSTED
+                        | RUNNING
+                        | UNAVAILABLE
+                        | crate::commands::policy_help::SERVICE_UNREACHABLE
+                        | crate::commands::policy_help::SERVER_RELEASE_DIFFERS
+                )
+            }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_policy_read_that_failed_was_not_evaluated_and_has_no_charge() {
+        // This CLI's own refusals of a policy read carry an HTTP status and a code, but the server
+        // evaluated nothing: no signed charge lookup follows them.
+        for code in ["service_unreachable", "server_release_differs"] {
+            assert!(!charged_denial(&Error::refused(503, code, "x")), "{code}");
+        }
+        assert!(charged_denial(&Error::refused(409, "policy_denied", "x")));
+    }
 
     #[test]
     fn a_charge_reads_only_plain_amounts_and_words() {
