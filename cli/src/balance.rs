@@ -58,14 +58,14 @@ mod tests {
 
     #[test]
     fn a_balance_reads_in_display_units_of_the_wallet_asset() {
-        let seen = json!({"asset": "CASSET", "assetCode": "XLM", "holder": "CWALLET",
+        let seen = json!({"asset": "CASSET", "assetCode": "COIN", "holder": "CWALLET",
             "balance": "5000000000", "decimals": 7, "observedAt": 1_795_003_303u64,
             "source": "CASSET balance at ledger 100"});
-        let (field, text) = shown(&seen, "XLM");
-        assert_eq!(text, "500 XLM");
+        let (field, text) = shown(&seen, "COIN");
+        assert_eq!(text, "500 COIN");
         assert_eq!(
             field,
-            json!({"amount": "500", "asset": "XLM", "units": "5000000000",
+            json!({"amount": "500", "asset": "COIN", "units": "5000000000",
                 "observedAt": 1_795_003_303u64, "source": "CASSET balance at ledger 100"})
         );
         let (_, text) = shown(&json!({"balance": "1", "decimals": 6}), "USDC");
