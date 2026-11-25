@@ -405,15 +405,16 @@ fn public_profile_shows_without_agent_key_or_engine() {
     every_rail(|rail| {
         let net = rail.network;
         let (sandbox, profile) = profile_sandbox(rail);
+        let described = common::describe(rail, &profile);
         let shown = sandbox.json(&["--rail", net, "wallet", "show"]);
         assert_eq!(shown["network"], net);
         assert_eq!(shown["rail"], net);
-        assert_eq!(shown["wallet"], profile["wallet"]);
+        assert_eq!(shown["wallet"], described.wallet);
         assert!(shown.get("signingSeed").is_none());
         assert!(shown.get("endpoints").is_none());
         assert!(shown.get("policy").is_none());
         let summary = sandbox.json(&["--rail", net, "policy", "show"]);
-        assert_eq!(summary["policyId"], profile["policyId"]);
+        assert_eq!(summary["policyId"], described.policy_id);
         let source = sandbox.ok(&["--rail", net, "policy", "show", "--source"]);
         assert!(!source.trim().is_empty());
         assert!(!source.contains('\x1b'));
@@ -425,7 +426,7 @@ fn public_profile_shows_without_agent_key_or_engine() {
         );
         assert_eq!(json.as_object().unwrap().len(), 1, "{json}");
         // Explicit selection keeps the same exact public profile binding.
-        let wallet = profile["wallet"].as_str().unwrap();
+        let wallet = described.wallet.as_str();
         let output = sandbox.run(&["--rail", net, "--wallet", wallet, "wallet", "show"]);
         assert_eq!(code(&output), Some(0), "{}", stderr(&output));
         assert!(stdout(&output).contains(wallet));
@@ -462,7 +463,8 @@ fn wallet_selection_keeps_its_checksum_and_exact_profile_binding() {
     every_rail(|rail| {
         let net = rail.network;
         let (sandbox, profile) = profile_sandbox(rail);
-        let wallet = profile["wallet"].as_str().unwrap();
+        let described = common::describe(rail, &profile);
+        let wallet = described.wallet.as_str();
         sandbox.ok(&["rail", "use", net]);
         sandbox.ok(&["wallet", "use", wallet]);
         assert_eq!(sandbox.json(&["wallet", "show"])["wallet"], wallet);

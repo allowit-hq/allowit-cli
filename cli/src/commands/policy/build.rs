@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 pub(crate) const EXAMPLES: &str = "\
 Examples:
   allowit policy build POLICY_ID --ticket TICKET --source-hash SHA256
-  allowit policy build POLICY_ID --owner-key owner --origin http://localhost:5173 --out wallet.wasm";
+  allowit policy build POLICY_ID --owner-key owner --origin http://localhost:5173 --out wallet.code";
 
 /// Build the wallet code of a Custom policy from the source that the owner signed
 #[derive(clap::Args, Debug)]
