@@ -200,40 +200,33 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
 }
 
 /// The rail's public profile fixture with `destinations` among its params, at the place where
-/// that rail keeps them: the object that holds every param that the rail reads from the fixture.
+/// that rail keeps them: the first object of the document where the rail reads the added param.
 /// The test names no rail's document shape.
 fn with_destinations(net: &str, profile: &[u8], list: Value) -> Value {
-    fn holder(value: &Value, keys: &[String], at: String) -> Option<String> {
-        match value {
-            Value::Object(map) => {
-                if keys.iter().all(|key| map.contains_key(key)) {
-                    return Some(at);
-                }
-                map.iter().find_map(|(key, child)| {
-                    let key = key.replace('~', "~0").replace('/', "~1");
-                    holder(child, keys, format!("{at}/{key}"))
-                })
+    fn objects(value: &Value, at: String, out: &mut Vec<String>) {
+        if let Value::Object(map) = value {
+            out.push(at.clone());
+            for (key, child) in map {
+                let key = key.replace('~', "~0").replace('/', "~1");
+                objects(child, format!("{at}/{key}"), out);
             }
-            _ => None,
         }
     }
-    let mut document: Value = serde_json::from_slice(profile).unwrap();
-    let keys: Vec<String> = allowit_sdk::kinds::param_values(net, &document)
-        .unwrap()
+    let document: Value = serde_json::from_slice(profile).unwrap();
+    let mut places = vec![];
+    objects(&document, String::new(), &mut places);
+    places
         .into_iter()
-        .map(|(key, _)| key)
-        .collect();
-    assert!(!keys.is_empty(), "{net}: the profile fixture has no params");
-    let at = holder(&document, &keys, String::new()).expect("the params' object");
-    document.pointer_mut(&at).unwrap()["destinations"] = json!({ "List": list });
-    assert!(
-        allowit_sdk::kinds::param_values(net, &document)
-            .unwrap()
-            .iter()
-            .any(|(key, _)| key == "destinations"),
-        "{net}: the rail reads the added payees"
-    );
-    document
+        .find_map(|at| {
+            let mut candidate = document.clone();
+            candidate.pointer_mut(&at)?["destinations"] = json!({ "List": list.clone() });
+            allowit_sdk::kinds::param_values(net, &candidate)
+                .ok()?
+                .iter()
+                .any(|(key, value)| key == "destinations" && value["List"] == list)
+                .then_some(candidate)
+        })
+        .unwrap_or_else(|| panic!("{net}: the rail reads no added payees from its profile"))
 }
 
 fn sandbox_url(sandbox: &Sandbox) -> String {
