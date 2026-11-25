@@ -365,6 +365,69 @@ enum LocalAgent {
 /// agent reads. The rail's selected agent key goes first, then each other local key of the
 /// rail; the first key that the server admits ends the search. At most [`MAX_AGENT_KEYS`] keys
 /// are tried; a search that leaves keys untried says so.
+/// The canonical param of the payees that a policy allows.
+const PAYEES: &str = "destinations";
+
+/// The payees of `profile` as its rail reads them, in their order, each checked on its own: an
+/// entry that is no recipient address of the rail is left out and the others stay. The rail
+/// decides where its profile keeps its params. A rail that refuses the whole profile because of
+/// a malformed payee reads it again with only the payees that pass, at the one place where it
+/// then finds exactly those.
+fn profile_payees(rail: &RailInfo, profile: &Value) -> Vec<String> {
+    let valid = |list: &[Value]| -> Vec<Value> {
+        list.iter()
+            .filter(|entry| {
+                entry["Addr"]
+                    .as_str()
+                    .is_some_and(|to| address::check_recipient(rail.family, to).is_ok())
+            })
+            .cloned()
+            .collect()
+    };
+    let read = |document: &Value| -> Option<Vec<Value>> {
+        allowit_sdk::kinds::param_values(rail.id, document)
+            .ok()?
+            .into_iter()
+            .find(|(key, _)| key == PAYEES)?
+            .1["List"]
+            .as_array()
+            .cloned()
+    };
+    let addresses = |list: Vec<Value>| -> Vec<String> {
+        list.iter()
+            .filter_map(|entry| entry["Addr"].as_str().map(str::to_owned))
+            .collect()
+    };
+    if allowit_sdk::kinds::param_values(rail.id, profile).is_ok() {
+        return addresses(read(profile).map(|list| valid(&list)).unwrap_or_default());
+    }
+    // Every list of payees in the document, by its JSON pointer.
+    fn lists(value: &Value, at: String, out: &mut Vec<String>) {
+        if let Value::Object(map) = value {
+            for (key, child) in map {
+                let here = format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"));
+                if key == PAYEES && child["List"].is_array() {
+                    out.push(here.clone());
+                }
+                lists(child, here, out);
+            }
+        }
+    }
+    let mut found = vec![];
+    lists(profile, String::new(), &mut found);
+    found
+        .into_iter()
+        .find_map(|at| {
+            let mut kept = profile.clone();
+            let list = kept.pointer_mut(&at)?;
+            let checked = valid(list["List"].as_array()?);
+            list["List"] = Value::Array(checked.clone());
+            (read(&kept)? == checked).then_some(checked)
+        })
+        .map(addresses)
+        .unwrap_or_default()
+}
+
 fn local_agent(cx: &mut Ctx, rail: &RailInfo, origin: &str, id: &str) -> Result<LocalAgent> {
     let dir = cx.dir()?;
     let selected = cx.settings()?.rail(rail.id).agent;
@@ -665,27 +728,16 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                 };
                 // The payees that the owner allows, when the policy lists them: the payment
                 // command names the first one. The rail reads its profile's params, wherever
-                // it keeps them.
+                // it keeps them; each payee is checked on its own.
                 payees = mine
                     .profile
                     .as_ref()
-                    .and_then(|profile| allowit_sdk::kinds::param_values(rail.id, profile).ok())
-                    .and_then(|params| {
-                        params
-                            .into_iter()
-                            .find(|(key, _)| key == "destinations")
-                            .map(|(_, value)| value)
-                    })
-                    .and_then(|value| value["List"].as_array().cloned())
-                    .map(|list| {
-                        list.iter()
-                            .take(MAX_PAYEES)
-                            .filter_map(|entry| entry["Addr"].as_str())
-                            .filter(|to| address::check_recipient(rail.family, to).is_ok())
-                            .filter_map(|to| shell_safe(to, 128).ok())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                    .map(|profile| profile_payees(rail, profile))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .take(MAX_PAYEES)
+                    .filter_map(|to| shell_safe(&to, 128).ok())
+                    .collect();
                 let destination = payees
                     .first()
                     .cloned()

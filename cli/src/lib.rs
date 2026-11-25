@@ -228,6 +228,7 @@ fn render_error(out: &mut Out, e: &Error) {
         .detail("reason")
         .filter(|reason| explained.is_some() || !e.message.contains(reason));
     let rule = e.detail("rule");
+    let transactions = error_transactions(e);
     let message = explained.as_ref().map_or(e.message.as_str(), |x| x.title);
     let charge = out.credits.take();
     if out.json {
@@ -248,6 +249,18 @@ fn render_error(out: &mut Out, e: &Error) {
         }
         if let Some(reason) = reason {
             value["error"]["reason"] = reason.into();
+        }
+        if !transactions.is_empty() {
+            value["error"]["transactions"] = transactions
+                .iter()
+                .map(|rows| {
+                    rows.iter()
+                        .map(|(key, value)| ((*key).to_owned(), value.as_str().into()))
+                        .collect::<serde_json::Map<_, _>>()
+                        .into()
+                })
+                .collect::<Vec<Value>>()
+                .into();
         }
         if let Some(explained) = &explained {
             value["error"]["cause"] = cause.unwrap_or(sent).into();
@@ -283,6 +296,11 @@ fn render_error(out: &mut Out, e: &Error) {
         if let Some(reason) = reason {
             out.stderr += &format!("reason: {}\n", sender_text(reason));
         }
+        for rows in &transactions {
+            for (key, value) in rows {
+                out.stderr += &format!("{key}: {}\n", sender_text(value));
+            }
+        }
         if let Some(fix) = explained.as_ref().and_then(|x| x.fix) {
             out.stderr += &format!("fix: {fix}\n");
         }
@@ -313,6 +331,37 @@ fn render_error(out: &mut Out, e: &Error) {
 /// A sender's text on a labelled line of stderr. Display controls are escaped, and each later
 /// line starts with two spaces, so no part of it reads as a line of this CLI such as `fix:` or
 /// `help:`.
+/// The transactions that an error names in its `details`, such as an owner step that is sent
+/// and not finalized: the action, hash, status and explorer link of each, as printable text. A
+/// value that is empty, long or holds a control character is left out.
+fn error_transactions(e: &Error) -> Vec<Vec<(&'static str, String)>> {
+    let Some(items) = e
+        .details
+        .as_ref()
+        .and_then(|details| details.get("transactions"))
+        .and_then(Value::as_array)
+    else {
+        return vec![];
+    };
+    items
+        .iter()
+        .take(8)
+        .map(|item| {
+            ["action", "transactionHash", "status", "explorer"]
+                .into_iter()
+                .filter_map(|key| {
+                    let value = item.get(key)?.as_str()?;
+                    (!value.is_empty()
+                        && value.len() <= 300
+                        && !value.chars().any(char::is_control))
+                    .then(|| (key, value.to_owned()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|rows| !rows.is_empty())
+        .collect()
+}
+
 fn sender_text(text: &str) -> String {
     safe_output(text.trim_end().to_owned()).replace('\n', "\n  ")
 }
@@ -359,6 +408,42 @@ pub(crate) fn redact(s: String) -> String {
 /// Writes pending stderr now, before a request can leave the process.
 pub(crate) fn flush_stderr(stderr: &mut String) {
     let _ = std::io::stderr().write_all(redact(std::mem::take(stderr)).as_bytes());
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::render_error;
+    use crate::error::Error;
+    use crate::term::Out;
+    use serde_json::json;
+
+    /// A step that is sent and not finalized names its transaction in text and in JSON; a value
+    /// with a control character is left out.
+    #[test]
+    fn an_uncertain_step_prints_the_transaction_that_its_details_name() {
+        let error = Error::uncertain("The refill is sent and not finalized yet.").with_details(json!({
+            "transactions": [{"action": "refill", "transactionHash": "abc", "status": "submitted",
+                "explorer": "https://explorer.example/tx/abc\u{1b}"}]
+        }));
+        crate::config::with_settings(&[("ALLOWIT_URL", String::new())], || {
+            let mut out = Out::new(false, true, false, true);
+            render_error(&mut out, &error);
+            assert!(
+                out.stderr.contains("transactionHash: abc\n"),
+                "{}",
+                out.stderr
+            );
+            assert!(out.stderr.contains("status: submitted\n"), "{}", out.stderr);
+            assert!(!out.stderr.contains("explorer"), "{}", out.stderr);
+            let mut out = Out::new(true, true, false, true);
+            render_error(&mut out, &error);
+            let value: serde_json::Value = serde_json::from_str(out.stderr.trim()).unwrap();
+            assert_eq!(value["error"]["transactions"][0]["transactionHash"], "abc");
+            assert_eq!(value["error"]["exit"], 5);
+            Ok(())
+        })
+        .unwrap();
+    }
 }
 
 #[cfg(test)]

@@ -57,7 +57,7 @@ fn a_setup_without_yes_names_its_network_and_reaches_no_server() {
             stderr(&output)
         );
         assert!(
-            stderr(&output).contains("with 20 of the wallet's asset for the agent's payments"),
+            stderr(&output).contains("fund it with 20 of the wallet's asset"),
             "{}",
             stderr(&output)
         );

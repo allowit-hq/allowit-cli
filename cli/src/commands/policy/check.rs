@@ -133,10 +133,10 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
         (None, false) if portable.is_err() => Some(WalletKind::Native),
         (None, false) => None,
     };
-    // A selected rail (`--rail`, `ALLOWIT_RAIL`) holds the policy only in a kind that it offers:
-    // a check never passes a policy for a wallet that the rail cannot set up.
-    if let (Some(kind), Some(rail)) = (kind, cx.global.rail.as_deref()) {
-        kinds::require(crate::routing::normalize(rail)?, kind)?;
+    // A selected rail (`--rail`, `ALLOWIT_RAIL` or `rail use`) holds the policy only in a kind
+    // that it offers: a check never passes a policy for a wallet that the rail cannot set up.
+    if let (Some(kind), Some(rail)) = (kind, cx.rail_opt()?) {
+        kinds::require(rail.id, kind)?;
     }
     // The contract of a Custom wallet compiles the on-chain part of its one source. Core
     // derives it; a source whose part cannot be derived reaches no Custom wallet.
