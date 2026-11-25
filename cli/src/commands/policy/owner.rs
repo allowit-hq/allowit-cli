@@ -96,22 +96,14 @@ fn check(cx: &mut Ctx, id: &str) -> Result<()> {
     }
     Ok(())
 }
-/// The question of a deployment. A Native deployment creates the agent's wallet account with one
-/// owner setup, which moves the amount on top of the network's reserve and a fee float: the owner
-/// confirms the network and all of it, as `wallet setup` asks.
+/// The question of a deployment. A Native deployment sets up the agent's wallet with one owner
+/// setup and binds the draft to it: the owner confirms the network and the amount, as `wallet
+/// setup` asks.
 fn deploy_question(native: bool, network: &str, amount: Option<&str>) -> String {
     if !native {
         return "Deploy and fund this exact policy wallet using the owner account".into();
     }
-    let funding = match amount {
-        Some(amount) => {
-            format!("{amount} of the wallet's asset plus the network's reserve and a fee float")
-        }
-        None => "the network's reserve and a fee float".into(),
-    };
-    format!(
-        "Create this agent's wallet account on {network} from the owner's account, fund it with {funding}, set its signers, and bind this exact policy to it"
-    )
+    crate::commands::wallet::setup::question(network, amount, true)
 }
 pub(crate) fn deploy(a: Deploy, cx: &mut Ctx) -> Result<i32> {
     check(cx, &a.session.request_id)?;
@@ -181,7 +173,9 @@ pub(crate) fn fund(a: Fund, cx: &mut Ctx) -> Result<i32> {
     check(cx, &a.session.request_id)?;
     let local = owner::load(cx, &a.session.owner_key)?;
     let document = read_input(&a.policy_file)?;
-    cx.confirm("Transfer this amount from the owner to the selected wallet")?;
+    // On every rail the amount becomes spendable by the wallet: one rail transfers it, another
+    // approves it from the owner's own account.
+    cx.confirm(FUND_QUESTION)?;
     let network = cx.rail()?.id;
     let out = shared::fund(
         &local.context(&a.session.origin),
@@ -193,6 +187,9 @@ pub(crate) fn fund(a: Fund, cx: &mut Ctx) -> Result<i32> {
     crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(0)
 }
+/// The question of a funding.
+const FUND_QUESTION: &str = "Add this amount of the installed asset to what the selected wallet can spend, from the owner's account";
+
 pub(crate) fn activate(a: Activate, cx: &mut Ctx) -> Result<i32> {
     check(cx, &a.session.request_id)?;
     let local = owner::load(cx, &a.session.owner_key)?;
@@ -245,23 +242,31 @@ pub(crate) fn status(a: Status, cx: &mut Ctx) -> Result<i32> {
 }
 #[cfg(test)]
 mod tests {
-    use super::deploy_question;
+    use super::{FUND_QUESTION, deploy_question};
 
-    /// The owner of a Native deployment confirms the network, the amount and the reserve with the
-    /// fee float that its setup moves; a contract wallet's question does not change.
+    /// The owner of a Native deployment confirms the network and the amount for the agent's
+    /// payments; a contract wallet's question does not change.
     #[test]
-    fn a_native_deployment_names_what_its_setup_moves() {
+    fn a_native_deployment_names_its_network_and_amount() {
         assert_eq!(
             deploy_question(true, "net:test", Some("20")),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with 20 of the wallet's asset plus the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+            "Set up this agent's wallet on net:test from the owner's account with 20 of the wallet's asset for the agent's payments, set its signers and bind this exact policy to it; the owner's account pays the network's deposits and fees for it"
         );
         assert_eq!(
             deploy_question(true, "net:test", None),
-            "Create this agent's wallet account on net:test from the owner's account, fund it with the network's reserve and a fee float, set its signers, and bind this exact policy to it"
+            "Set up this agent's wallet on net:test from the owner's account, set its signers and bind this exact policy to it; the owner's account pays the network's deposits and fees for it"
         );
         assert_eq!(
             deploy_question(false, "net:test", Some("20")),
             "Deploy and fund this exact policy wallet using the owner account"
         );
+    }
+
+    /// A funding states what holds on every rail: the wallet can spend more. It never says that
+    /// tokens move, which a rail that approves an allowance does not do.
+    #[test]
+    fn a_funding_says_what_the_wallet_can_spend() {
+        assert!(!FUND_QUESTION.to_lowercase().contains("transfer"));
+        assert!(FUND_QUESTION.contains("can spend"));
     }
 }

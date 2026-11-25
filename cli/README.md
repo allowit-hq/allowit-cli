@@ -119,8 +119,8 @@ allowit policy kinds [--server]
 allowit policy generate --owner-key NAME --origin ORIGIN --kind native|simple|standard|custom (--new-wallet | --installation ID) PROMPT
 allowit policy show [--source]
 allowit policy check POLICY.rs [--kind native|simple|standard|custom] [--compile] [--onchain]
-allowit policy build POLICY_ID (--ticket TICKET --source-hash SHA256 | --owner-key NAME --origin ORIGIN [--server-key PUBLIC_KEY]) [--out WASM]
-allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR [--executable WASM] --fee-limit FEE [--amount AMOUNT] [--fee-asset-amount AMOUNT]
+allowit policy build POLICY_ID (--ticket TICKET --source-hash SHA256 | --owner-key NAME --origin ORIGIN [--server-key PUBLIC_KEY]) [--out FILE]
+allowit policy deploy DRAFT --owner-key NAME --origin ORIGIN --request-id ID --agent-key NAME --server ADDR [--executable FILE] --fee-limit FEE [--amount AMOUNT] [--fee-asset-amount AMOUNT]
 allowit policy fund SELECTION --owner-key NAME --origin ORIGIN --request-id ID --amount AMOUNT --fee-limit FEE
 allowit policy activate SELECTION --owner-key NAME --origin ORIGIN --request-id ID [--agent-key NAME --server ADDR]
 allowit policy export SELECTION --owner-key NAME --origin ORIGIN --activation-id ID
@@ -515,7 +515,7 @@ owner's one creation signature names the code by its hash.
 # From the app: copy the build command that Review and sign shows.
 allowit policy build POLICY_ID --ticket TICKET --source-hash SHA256
 # With a local owner key: the command reads the ticket and the signed source hash itself.
-allowit policy build POLICY_ID --owner-key owner --origin ORIGIN --out wallet.wasm
+allowit policy build POLICY_ID --owner-key owner --origin ORIGIN --out wallet.code
 ```
 
 1. The command reads the source that the server admitted with the build ticket. It compiles nothing unless that
@@ -562,7 +562,7 @@ allowit --json policy params set draft.json daily_spending_limit 3 \
 
 # 3. Deploy the reviewed wallet, fund it and verify it on the ledger.
 allowit --rpc-url URL --json policy deploy draft-2.json --owner-key owner --origin ORIGIN --agent-key agent \
-  --server ADDRESS --executable wallet.wasm --request-id deploy-0001 --fee-limit FEE --yes > wallet.json
+  --server ADDRESS --executable wallet.code --request-id deploy-0001 --fee-limit FEE --yes > wallet.json
 allowit --rpc-url URL --json policy fund wallet.json --owner-key owner --origin ORIGIN \
   --request-id fund-0001 --amount 20 --fee-limit FEE --yes
 allowit --rpc-url URL policy verify wallet.json --owner-key owner

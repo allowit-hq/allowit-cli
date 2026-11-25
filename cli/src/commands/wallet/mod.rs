@@ -2,7 +2,7 @@
 //! address; `wallet use` caches it as the rail's default.
 mod import;
 mod ls;
-mod setup;
+pub(crate) mod setup;
 mod show;
 mod r#use;
 

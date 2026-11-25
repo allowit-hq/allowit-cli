@@ -16,7 +16,7 @@ mod rail;
 mod skills;
 mod status;
 mod version;
-mod wallet;
+pub(crate) mod wallet;
 
 use crate::{VERSION_LINE, ctx::Ctx, error::Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};

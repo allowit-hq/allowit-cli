@@ -664,13 +664,19 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                     (None, _) => "ASSET".to_owned(),
                 };
                 // The payees that the owner allows, when the policy lists them: the payment
-                // command names the first one.
+                // command names the first one. The rail reads its profile's params, wherever
+                // it keeps them.
                 payees = mine
                     .profile
                     .as_ref()
-                    .and_then(|profile| {
-                        profile["portable"]["params"]["destinations"]["List"].as_array()
+                    .and_then(|profile| allowit_sdk::kinds::param_values(rail.id, profile).ok())
+                    .and_then(|params| {
+                        params
+                            .into_iter()
+                            .find(|(key, _)| key == "destinations")
+                            .map(|(_, value)| value)
                     })
+                    .and_then(|value| value["List"].as_array().cloned())
                     .map(|list| {
                         list.iter()
                             .take(MAX_PAYEES)

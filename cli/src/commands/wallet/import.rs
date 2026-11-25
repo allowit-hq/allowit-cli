@@ -52,15 +52,14 @@ pub(crate) fn run(a: Args, cx: &mut Ctx) -> Result<i32> {
     // A profile that the agent asked for by its policy id becomes the selected version of its
     // wallet for the selected agent key. An older cached version of the same wallet, such as
     // the one before a value change, then cannot serve the next request.
+    // The wallet is the one that the rail decoded from the profile: its place in the document is
+    // the rail's.
     if a.policy.is_some()
         && let Ok(agent) = cx.agent(rail)
-        && let Some(wallet) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            .ok()
-            .and_then(|profile| profile["wallet"].as_str().map(str::to_owned))
     {
         let _ = cache.select(&allowit_sdk::profiles::Selector {
             network: rail.id.into(),
-            wallet: Some(wallet),
+            wallet: Some(p.description().wallet.clone()),
             agent: Some(agent.address),
             version: Some(p.version.clone()),
             ..Default::default()
