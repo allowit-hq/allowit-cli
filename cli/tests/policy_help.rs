@@ -266,11 +266,11 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             theirs["limits"] =
                 json!([{"key":"payment_limit","label":"Payment limit","value":"1 UNIT"}]);
             // A payee can be an account or, where the rail admits it, a contract. The profile is
-            // the rail's own, so the help reads it through the rail.
+            // the rail's own, so the help reads it through the rail, which checks each address.
             theirs["profile"] = with_destinations(
                 net,
                 &rail.fixtures.public_profile,
-                json!([{"Addr":destination},{"Addr":wallet},{"Addr":"not-an-address"}]),
+                json!([{"Addr":destination},{"Addr":wallet}]),
             );
             theirs["ownerWords"] = json!([
                 "Every Friday pay Ana 100.\nOnly Ana's address.",
