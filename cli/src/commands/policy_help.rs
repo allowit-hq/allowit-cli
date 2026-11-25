@@ -703,6 +703,8 @@ pub(crate) fn run(args: Args, cx: &mut Ctx) -> Result<i32> {
                         with_url(&format!("{cli} status pay-0001 --wait 60s")),
                     ),
                     ("history", format!("{cli} history")),
+                    // What the wallet holds now, with the limits.
+                    ("balance", with_url(&format!("{pay} wallet show"))),
                     // A paid service from the server's marketplace: `call` pays its seller through
                     // the same policy, at most the price that it names.
                     ("search", with_url(&format!("{cli} skills search WORDS"))),

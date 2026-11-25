@@ -277,6 +277,8 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             ),
             format!("  ALLOWIT_URL={origin} allowit status pay-0001 --wait 60s"),
             "  allowit history".into(),
+            // What the wallet holds now, with its limits.
+            format!("  ALLOWIT_URL={origin} allowit wallet show"),
             // A paid service from the marketplace, paid through the same policy.
             format!("  ALLOWIT_URL={origin} allowit skills search WORDS"),
             format!("  ALLOWIT_URL={origin} allowit call ENTRY --max-price UNIT:AMOUNT"),
@@ -326,7 +328,7 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             .chain(value["examples"].as_object().unwrap().values())
             .map(|command| command.as_str().unwrap())
             .collect();
-        assert_eq!(commands.len(), 9);
+        assert_eq!(commands.len(), 10);
         for command in commands {
             assert!(
                 command.contains(&format!("allowit --config-dir {named} ")),
