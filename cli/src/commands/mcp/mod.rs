@@ -155,7 +155,7 @@ fn tools() -> Value {
         },
         {
             "name": "wallet_show",
-            "description": "Show the selected wallet: its kind, policy params and spending limits. Changes nothing.",
+            "description": "Show the selected wallet: its kind, balance, policy params and spending limits. Changes nothing.",
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
         }
     ])

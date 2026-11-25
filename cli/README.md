@@ -289,6 +289,8 @@ network `fee`, and it is no longer the installed fee bound.
 A limit for each payment, `payment_limit`, has no counter. `exec`, `status` and `wallet show` print it in the same table with `-` for `spent` and `remaining`.
 JSON lists it under `paymentLimits` as `{param, limit}`, where `limit` is a quantity; `limits` holds only the limits that the rail counts.
 `wallet show` reads the limits of the wallet from the server with the selected agent key, so a wallet that has made no payment shows its limits.
+
+`wallet show` also prints `balance`: what the wallet can send of its asset now, and what it holds when that is more (an account keeps a reserve), read on the network through the rail's `balance` function with no key and no server. The rail names the amounts and their scale. A rail without that read shows no balance; a failed or incomplete read warns and still prints the wallet.
 When the server cannot read the counters, `limits` is `null` in JSON and the text says so; the table never shows a zero that nothing counted.
 When the server refuses the read, `wallet show` still prints the wallet, warns with the server's code and message, and prints no limit.
 Every amount is a quantity `{units, asset, text}`. Text output prints `text`, which carries the asset's real unit.

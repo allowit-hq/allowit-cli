@@ -297,6 +297,26 @@ impl Rail {
         use allowit_sdk::execution::{Limits, WalletLimits};
         let p = self.profile(cx, wallet)?;
         let (mut json, mut text) = self.inspect(&p)?;
+        // What the wallet holds now, a read of the network that needs no key. A failed read
+        // warns, and the wallet still shows.
+        let held = p.description();
+        match crate::balance::read(cx, self.0, &held.wallet, &held.asset) {
+            Some(Ok(seen)) => match crate::balance::shown(&seen, &held.asset_symbol) {
+                Ok((field, line)) => {
+                    json["balance"] = field;
+                    text["balance"] = line.into();
+                }
+                Err(error) => {
+                    cx.out
+                        .warning(format!("the balance was not read: {}", error.message));
+                }
+            },
+            Some(Err(error)) => {
+                cx.out
+                    .warning(format!("the balance was not read: {}", error.message));
+            }
+            None => {}
+        }
         // A per-payment limit comes from the verified profile, so it shows
         // with or without a report of the counted limits.
         let mut limits = WalletLimits {

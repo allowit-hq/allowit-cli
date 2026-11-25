@@ -17,6 +17,7 @@ pub(crate) const VERSION_LINE: &str = concat!(
 );
 pub(crate) use allowit_sdk::{config, output, request};
 mod agent_read;
+mod balance;
 mod commands;
 mod credits;
 mod ctx;

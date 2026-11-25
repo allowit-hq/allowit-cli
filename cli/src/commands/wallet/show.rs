@@ -6,7 +6,7 @@ Examples:
   allowit wallet show
   allowit wallet show --wallet WALLET --json";
 
-/// Show the wallet: its roles, asset and state
+/// Show the wallet: its roles, asset, balance, state and limits
 #[derive(clap::Args, Debug)]
 pub(crate) struct Args {}
 
