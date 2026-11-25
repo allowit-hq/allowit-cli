@@ -199,6 +199,43 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
     });
 }
 
+/// The rail's public profile fixture with `destinations` among its params, at the place where
+/// that rail keeps them: the object that holds every param that the rail reads from the fixture.
+/// The test names no rail's document shape.
+fn with_destinations(net: &str, profile: &[u8], list: Value) -> Value {
+    fn holder(value: &Value, keys: &[String], at: String) -> Option<String> {
+        match value {
+            Value::Object(map) => {
+                if keys.iter().all(|key| map.contains_key(key)) {
+                    return Some(at);
+                }
+                map.iter().find_map(|(key, child)| {
+                    let key = key.replace('~', "~0").replace('/', "~1");
+                    holder(child, keys, format!("{at}/{key}"))
+                })
+            }
+            _ => None,
+        }
+    }
+    let mut document: Value = serde_json::from_slice(profile).unwrap();
+    let keys: Vec<String> = allowit_sdk::kinds::param_values(net, &document)
+        .unwrap()
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    assert!(!keys.is_empty(), "{net}: the profile fixture has no params");
+    let at = holder(&document, &keys, String::new()).expect("the params' object");
+    document.pointer_mut(&at).unwrap()["destinations"] = json!({ "List": list });
+    assert!(
+        allowit_sdk::kinds::param_values(net, &document)
+            .unwrap()
+            .iter()
+            .any(|(key, _)| key == "destinations"),
+        "{net}: the rail reads the added payees"
+    );
+    document
+}
+
 fn sandbox_url(sandbox: &Sandbox) -> String {
     let shown = sandbox.json(&["config", "show"]);
     shown["engineUrl"].as_str().unwrap().to_owned()
@@ -228,10 +265,13 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             theirs["assetSymbol"] = json!("UNIT");
             theirs["limits"] =
                 json!([{"key":"payment_limit","label":"Payment limit","value":"1 UNIT"}]);
-            // A payee can be an account or, where the rail admits it, a contract.
-            theirs["profile"] = json!({"portable":{"params":{"destinations":{"List":[
-                {"Addr":destination},{"Addr":wallet},{"Addr":"not-an-address"}
-            ]}}}});
+            // A payee can be an account or, where the rail admits it, a contract. The profile is
+            // the rail's own, so the help reads it through the rail.
+            theirs["profile"] = with_destinations(
+                net,
+                &rail.fixtures.public_profile,
+                json!([{"Addr":destination},{"Addr":wallet},{"Addr":"not-an-address"}]),
+            );
             theirs["ownerWords"] = json!([
                 "Every Friday pay Ana 100.\nOnly Ana's address.",
                 "Also pay Ben 150 on Fridays.",
