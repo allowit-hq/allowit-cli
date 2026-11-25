@@ -301,11 +301,16 @@ impl Rail {
         // warns, and the wallet still shows.
         let held = p.description();
         match crate::balance::read(cx, self.0, &held.wallet, &held.asset) {
-            Some(Ok(seen)) => {
-                let (field, line) = crate::balance::shown(&seen, &held.asset_symbol);
-                json["balance"] = field;
-                text["balance"] = line.into();
-            }
+            Some(Ok(seen)) => match crate::balance::shown(&seen, &held.asset_symbol) {
+                Ok((field, line)) => {
+                    json["balance"] = field;
+                    text["balance"] = line.into();
+                }
+                Err(error) => {
+                    cx.out
+                        .warning(format!("the balance was not read: {}", error.message));
+                }
+            },
             Some(Err(error)) => {
                 cx.out
                     .warning(format!("the balance was not read: {}", error.message));
