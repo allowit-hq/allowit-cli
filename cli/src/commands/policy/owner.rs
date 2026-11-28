@@ -231,21 +231,52 @@ pub(crate) struct Status {
 }
 pub(crate) fn status(a: Status, cx: &mut Ctx) -> Result<i32> {
     let out = owner::status(cx, &a.request_id)?;
-    let code = if out["transactions"]
-        .as_array()
-        .is_some_and(|v| !v.is_empty() && v.iter().all(|t| t["status"] == "confirmed"))
-    {
-        0
-    } else {
-        5
-    };
+    let code = status_exit(&out).code();
     let network = cx.rail()?.id;
     crate::receipt::show_owner(&mut cx.out, network, out);
     Ok(code)
 }
+/// The exit of an owner status: 0 when every transaction is confirmed; 4, as the owner step
+/// itself exits, when one failed on the ledger (the step is over: a new request ID starts again);
+/// otherwise 5, ask again with the same request ID.
+fn status_exit(document: &serde_json::Value) -> crate::exit::Exit {
+    use crate::exit::Exit;
+    let statuses: Vec<_> = document["transactions"]
+        .as_array()
+        .map(|items| items.iter().map(|t| &t["status"]).collect())
+        .unwrap_or_default();
+    if statuses.iter().any(|status| *status == "failed") {
+        Exit::Rejected
+    } else if !statuses.is_empty() && statuses.iter().all(|status| *status == "confirmed") {
+        Exit::Ok
+    } else {
+        Exit::Uncertain
+    }
+}
 #[cfg(test)]
 mod tests {
-    use super::deploy_question;
+    use super::{deploy_question, status_exit};
+    use crate::exit::Exit;
+    use serde_json::json;
+
+    /// A confirmed step exits 0, a failed one 4 like the step itself, anything else 5.
+    #[test]
+    fn an_owner_status_exits_by_its_transactions() {
+        let of = |statuses: &[&str]| {
+            status_exit(&json!({"transactions": statuses
+                .iter()
+                .map(|s| json!({"status": s}))
+                .collect::<Vec<_>>()}))
+        };
+        assert_eq!(of(&["confirmed"]), Exit::Ok);
+        assert_eq!(of(&["confirmed", "confirmed"]), Exit::Ok);
+        assert_eq!(of(&["failed"]), Exit::Rejected);
+        assert_eq!(of(&["confirmed", "failed"]), Exit::Rejected);
+        assert_eq!(of(&["submitted"]), Exit::Uncertain);
+        assert_eq!(of(&["submissionUnknown"]), Exit::Uncertain);
+        assert_eq!(of(&[]), Exit::Uncertain);
+        assert_eq!(status_exit(&json!({})), Exit::Uncertain);
+    }
 
     /// The owner of a Native deployment confirms the network, the amount and the reserve with the
     /// fee float that its setup moves; a contract wallet's question does not change.

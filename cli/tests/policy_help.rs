@@ -199,6 +199,42 @@ fn a_draft_tells_the_agent_to_make_its_key_and_report_it() {
     });
 }
 
+/// The rail's public profile fixture with `destinations` among its params, at the place where
+/// that rail keeps them: the first object of the document where the rail reads `list`. Then
+/// `malformed` joins the list at that place. The test names no rail's document shape.
+fn with_destinations(net: &str, profile: &[u8], list: Value, malformed: Value) -> Value {
+    fn objects(value: &Value, at: String, out: &mut Vec<String>) {
+        if let Value::Object(map) = value {
+            out.push(at.clone());
+            for (key, child) in map {
+                let key = key.replace('~', "~0").replace('/', "~1");
+                objects(child, format!("{at}/{key}"), out);
+            }
+        }
+    }
+    let document: Value = serde_json::from_slice(profile).unwrap();
+    let mut places = vec![];
+    objects(&document, String::new(), &mut places);
+    places
+        .into_iter()
+        .find_map(|at| {
+            let mut candidate = document.clone();
+            candidate.pointer_mut(&at)?["destinations"] = json!({ "List": list.clone() });
+            allowit_sdk::kinds::param_values(net, &candidate)
+                .ok()?
+                .iter()
+                .any(|(key, value)| key == "destinations" && value["List"] == list)
+                .then(|| {
+                    candidate.pointer_mut(&at).unwrap()["destinations"]["List"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(malformed.clone());
+                    candidate
+                })
+        })
+        .unwrap_or_else(|| panic!("{net}: the rail reads no added payees from its profile"))
+}
+
 fn sandbox_url(sandbox: &Sandbox) -> String {
     let shown = sandbox.json(&["config", "show"]);
     shown["engineUrl"].as_str().unwrap().to_owned()
@@ -228,10 +264,15 @@ fn an_active_policy_prints_import_and_payment_to_its_agent_key_only() {
             theirs["assetSymbol"] = json!("UNIT");
             theirs["limits"] =
                 json!([{"key":"payment_limit","label":"Payment limit","value":"1 UNIT"}]);
-            // A payee can be an account or, where the rail admits it, a contract.
-            theirs["profile"] = json!({"portable":{"params":{"destinations":{"List":[
-                {"Addr":destination},{"Addr":wallet},{"Addr":"not-an-address"}
-            ]}}}});
+            // A payee can be an account or, where the rail admits it, a contract. The profile is
+            // the rail's own, so the help reads it through the rail; a malformed entry drops
+            // only itself.
+            theirs["profile"] = with_destinations(
+                net,
+                &rail.fixtures.public_profile,
+                json!([{"Addr":destination},{"Addr":wallet}]),
+                json!({"Addr":"not-an-address"}),
+            );
             theirs["ownerWords"] = json!([
                 "Every Friday pay Ana 100.\nOnly Ana's address.",
                 "Also pay Ben 150 on Fridays.",
